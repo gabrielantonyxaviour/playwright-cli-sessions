@@ -26,6 +26,7 @@ import { checkExpiry, type ServiceExpiry } from "./session-expiry.js";
 
 export const SESSION_STORE_ROOT = join(homedir(), ".playwright-sessions");
 export const PROBE_CACHE_FILE = join(SESSION_STORE_ROOT, ".probe-cache.json");
+export const HEALTH_LOG_FILE = join(SESSION_STORE_ROOT, ".health.json");
 
 // ── File-format types (must match MCP's SavedState exactly) ─────────
 
