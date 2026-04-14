@@ -9,7 +9,11 @@
  */
 
 import { listSaved } from "../store.js";
-import { getCachedProbeResults, getCacheAgeMinutes } from "../probe-cache.js";
+import {
+  getCachedProbeResults,
+  getCacheAgeMinutes,
+  flushProbeCache,
+} from "../probe-cache.js";
 import { getProbeCapableServices } from "../session-probe.js";
 import type { SavedSessionInfo } from "../store.js";
 import type { ProbeResult } from "../session-probe.js";
@@ -101,6 +105,8 @@ export async function cmdList(opts: ListOptions): Promise<void> {
         sessionResults.push({ info, probeMap, cacheAgeMin });
       }),
     );
+    // Single flush after all parallel probes — eliminates concurrent-write race (fix A1)
+    flushProbeCache();
   } else {
     for (const info of sessions) {
       sessionResults.push({ info, cacheAgeMin: null });
@@ -153,7 +159,17 @@ export async function cmdList(opts: ListOptions): Promise<void> {
           const result = probeMap.get(a.service);
           if (result) {
             status = formatProbeStatus(result, cacheAgeMin);
+          } else if (capableServices.has(a.service)) {
+            // Probe-capable but probe returned no result — distinguish from
+            // genuinely non-probe-capable services so we don't mislead with
+            // "cookie-valid Nd" (fix A2: GitHub server-invalidated token bug)
+            const expiry = info.expiry.find((e) => e.service === a.service);
+            const expiryStr = expiry
+              ? formatExpiryStatus(expiry).replace("[", "").replace("]", "")
+              : "unknown";
+            status = `[no-probe-result, cookie ${expiryStr}]`;
           } else {
+            // Not probe-capable — cookie metadata is the only source
             const expiry = info.expiry.find((e) => e.service === a.service);
             status = formatExpiryStatus(expiry);
           }

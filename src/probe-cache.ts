@@ -2,7 +2,11 @@
  * Probe result cache — ~/.playwright-sessions/.probe-cache.json
  *
  * TTL: 1 hour. Shared with the MCP so both tools benefit from each other's probes.
- * Format matches the cache shape defined in the rebuild plan (Task A3).
+ *
+ * Fix (A1): Module-level in-memory cache — load once on first call, flush once
+ * after all parallel probes are done via flushProbeCache(). This eliminates the
+ * concurrent-write race where 16 parallel Promise.all probes each read+wrote
+ * the shared cache file, causing last-writer-wins corruption.
  */
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -21,23 +25,40 @@ interface CacheEntry {
 
 type ProbeCache = Record<string, CacheEntry>;
 
-function readCache(): ProbeCache {
-  if (!existsSync(PROBE_CACHE_FILE)) return {};
-  try {
-    return JSON.parse(readFileSync(PROBE_CACHE_FILE, "utf-8")) as ProbeCache;
-  } catch {
-    return {};
+let memCache: ProbeCache | null = null;
+let dirty = false;
+
+function ensureLoaded(): ProbeCache {
+  if (memCache) return memCache;
+  if (!existsSync(PROBE_CACHE_FILE)) {
+    memCache = {};
+    return memCache;
   }
+  try {
+    memCache = JSON.parse(
+      readFileSync(PROBE_CACHE_FILE, "utf-8"),
+    ) as ProbeCache;
+  } catch {
+    memCache = {};
+  }
+  return memCache;
 }
 
-function writeCache(cache: ProbeCache): void {
+/**
+ * Must be called by the caller (e.g. cmdList) once after all probes are done.
+ * Writes the in-memory cache to disk in a single atomic write.
+ */
+export function flushProbeCache(): void {
+  if (!dirty || !memCache) return;
   ensureRoot();
-  writeFileSync(PROBE_CACHE_FILE, JSON.stringify(cache, null, 2));
+  writeFileSync(PROBE_CACHE_FILE, JSON.stringify(memCache, null, 2));
+  dirty = false;
 }
 
 /**
  * Get probe results for a session, using cache when fresh (< 1h).
- * When stale or missing, runs live probes and updates the cache.
+ * When stale or missing, runs live probes and updates the in-memory cache.
+ * Call flushProbeCache() after all parallel calls are complete.
  */
 export async function getCachedProbeResults(
   sessionName: string,
@@ -45,12 +66,11 @@ export async function getCachedProbeResults(
   services: string[],
   timeoutMs = 5000,
 ): Promise<ProbeResult[]> {
-  const cache = readCache();
+  const cache = ensureLoaded();
   const entry = cache[sessionName];
   const now = Date.now();
 
   if (entry && now - entry.probedAt < CACHE_TTL_MS) {
-    // Return cached results, falling back to live probe for services not in cache
     const cached: ProbeResult[] = [];
     const needsProbe: string[] = [];
     for (const svc of services) {
@@ -69,9 +89,7 @@ export async function getCachedProbeResults(
 
     if (needsProbe.length === 0) return cached;
 
-    // Probe the missing ones
     const fresh = await probeServices(storageState, needsProbe, timeoutMs);
-    // Merge into cache
     for (const r of fresh) {
       entry.services[r.service] = {
         alive: r.alive,
@@ -80,7 +98,7 @@ export async function getCachedProbeResults(
       };
     }
     entry.probedAt = now;
-    writeCache(cache);
+    dirty = true;
     return [...cached, ...fresh];
   }
 
@@ -95,13 +113,13 @@ export async function getCachedProbeResults(
       ]),
     ),
   };
-  writeCache(cache);
+  dirty = true;
   return results;
 }
 
 /** Age of cache entry in minutes, or null if not cached. */
 export function getCacheAgeMinutes(sessionName: string): number | null {
-  const cache = readCache();
+  const cache = ensureLoaded();
   const entry = cache[sessionName];
   if (!entry) return null;
   return Math.floor((Date.now() - entry.probedAt) / 60000);
