@@ -1,0 +1,182 @@
+/**
+ * list — enumerate saved sessions with probe-based or cookie-based status.
+ *
+ * Usage:
+ *   playwright-cli-sessions list [--probe=false] [--json]
+ *
+ * Default: runs live HTTP probes (1-hour cache) for all detected services.
+ * Pass --probe=false to skip network calls and use cookie-expiry metadata only.
+ */
+
+import { listSaved } from "../store.js";
+import { getCachedProbeResults, getCacheAgeMinutes } from "../probe-cache.js";
+import { getProbeCapableServices } from "../session-probe.js";
+import type { SavedSessionInfo } from "../store.js";
+import type { ProbeResult } from "../session-probe.js";
+import type { ServiceExpiry } from "../session-expiry.js";
+
+interface ListOptions {
+  probe: boolean;
+  json: boolean;
+}
+
+// ── Status formatters ────────────────────────────────────────────────
+
+function formatProbeStatus(result: ProbeResult, ageMin: number | null): string {
+  if (result.reason === "no-probe") return "[no-probe]";
+  if (result.reason === "no-cookies") return "[no-cookies]";
+  if (result.alive) {
+    const age = ageMin !== null ? `, probed ${ageMin}m ago` : "";
+    return `[LIVE${age}]`;
+  }
+  return `[DEAD, ${result.reason}]`;
+}
+
+function formatExpiryStatus(expiry: ServiceExpiry | undefined): string {
+  if (!expiry) return "[unknown]";
+  switch (expiry.status) {
+    case "valid":
+      return `[cookie-valid ${expiry.daysUntilExpiry}d]`;
+    case "expiring-soon":
+      return `[expiring-soon ${expiry.daysUntilExpiry}d]`;
+    case "expired":
+      return "[cookie-expired]";
+    case "session-only":
+      return "[session-cookie]";
+    default:
+      return "[unknown]";
+  }
+}
+
+function formatSessionHeader(info: SavedSessionInfo): string {
+  const date = info.savedAt ? info.savedAt.slice(0, 10) : "unknown";
+  const urlPart = info.lastUrl ? `, ${info.lastUrl}` : "";
+  const clonePart = info.cloneOf ? ` [clone of ${info.cloneOf}]` : "";
+  return `${info.name} (saved ${date}${urlPart})${clonePart}`;
+}
+
+// ── Main export ──────────────────────────────────────────────────────
+
+export async function cmdList(opts: ListOptions): Promise<void> {
+  const sessions = listSaved();
+
+  if (sessions.length === 0) {
+    console.log("No saved sessions found in ~/.playwright-sessions/");
+    return;
+  }
+
+  const capableServices = new Set(getProbeCapableServices());
+
+  // Collect all results
+  const sessionResults: Array<{
+    info: SavedSessionInfo;
+    probeMap?: Map<string, ProbeResult>;
+    cacheAgeMin: number | null;
+  }> = [];
+
+  if (opts.probe) {
+    // Parallel probes across all sessions
+    await Promise.all(
+      sessions.map(async (info) => {
+        const services = info.auth
+          .map((a) => a.service)
+          .filter((s) => capableServices.has(s));
+        // Also include no-probe services (will return "no-probe" results)
+        const allServices = info.auth.map((a) => a.service);
+
+        let probeMap = new Map<string, ProbeResult>();
+        const cacheAgeMin = getCacheAgeMinutes(info.name);
+
+        if (services.length > 0) {
+          const results = await getCachedProbeResults(
+            info.name,
+            // We need to read storageState — listSaved doesn't include it for perf
+            // Re-read from disk for probes
+            await readStorageState(info.filePath),
+            allServices,
+          );
+          probeMap = new Map(results.map((r) => [r.service, r]));
+        }
+
+        sessionResults.push({ info, probeMap, cacheAgeMin });
+      }),
+    );
+  } else {
+    for (const info of sessions) {
+      sessionResults.push({ info, cacheAgeMin: null });
+    }
+  }
+
+  if (opts.json) {
+    // JSON output
+    const out = sessionResults.map(({ info, probeMap, cacheAgeMin }) => ({
+      name: info.name,
+      savedAt: info.savedAt,
+      lastUrl: info.lastUrl,
+      cloneOf: info.cloneOf,
+      services: info.auth.map((a) => {
+        const probeResult = probeMap?.get(a.service);
+        const expiry = info.expiry.find((e) => e.service === a.service);
+        return {
+          service: a.service,
+          identity: a.identity,
+          ...(probeResult
+            ? {
+                alive: probeResult.alive,
+                probeReason: probeResult.reason,
+                cacheAgeMin,
+              }
+            : {
+                expiryStatus: expiry?.status ?? "unknown",
+                daysUntilExpiry: expiry?.daysUntilExpiry,
+              }),
+        };
+      }),
+    }));
+    console.log(JSON.stringify(out, null, 2));
+    return;
+  }
+
+  // Human-readable output
+  for (const { info, probeMap, cacheAgeMin } of sessionResults) {
+    console.log(formatSessionHeader(info));
+
+    if (info.auth.length === 0) {
+      console.log("  (no services detected)");
+    } else {
+      for (const a of info.auth) {
+        const label = a.identity ? `${a.service} (${a.identity})` : a.service;
+        const padded = label.padEnd(34);
+
+        let status: string;
+        if (probeMap) {
+          const result = probeMap.get(a.service);
+          if (result) {
+            status = formatProbeStatus(result, cacheAgeMin);
+          } else {
+            const expiry = info.expiry.find((e) => e.service === a.service);
+            status = formatExpiryStatus(expiry);
+          }
+        } else {
+          const expiry = info.expiry.find((e) => e.service === a.service);
+          status = formatExpiryStatus(expiry);
+        }
+
+        console.log(`  ${padded} ${status}`);
+      }
+    }
+    console.log();
+  }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────
+
+async function readStorageState(filePath: string): Promise<unknown> {
+  const { readFileSync } = await import("node:fs");
+  try {
+    const data = JSON.parse(readFileSync(filePath, "utf-8"));
+    return data.storageState ?? null;
+  } catch {
+    return null;
+  }
+}

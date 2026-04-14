@@ -1,0 +1,40 @@
+{
+  "name": "playwright-cli-sessions",
+  "version": "0.1.0",
+  "description": "Session management layer for @playwright/cli — named saved logins, service probes, clone safety. Reads/writes ~/.playwright-sessions/ (interop with playwright-sessions MCP).",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "playwright-cli-sessions": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@playwright/cli": "^0.1.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "README.md"
+  ],
+  "keywords": [
+    "playwright",
+    "cli",
+    "sessions",
+    "auth",
+    "browser-automation"
+  ],
+  "author": "Gabriel Antony Xavier",
+  "license": "Apache-2.0"
+}
