@@ -1,7 +1,8 @@
 /**
- * restore <name> — launch a playwright-cli session pre-loaded with saved auth state.
+ * restore <name> [--out=<path>] — launch a playwright-cli session pre-loaded with saved auth state,
+ * or write storageState to a custom path for Playwright Test to consume (--out flag).
  *
- * Steps:
+ * Without --out:
  *   1. Read storageState from ~/.playwright-sessions/<name>.json
  *   2. Write it to a tmp file
  *   3. Spawn `playwright-cli -s=<name> open` in the background (non-blocking)
@@ -9,13 +10,17 @@
  *   5. Load state: `playwright-cli -s=<name> state-load <tmp>`
  *   6. Delete tmp
  *
- * The browser window stays open after this command exits.
+ * With --out=<path>:
+ *   Writes the raw storageState JSON to <path> and exits. Intended for use
+ *   in playwright.config.ts to wire saved auth into Playwright Test suites.
+ *
+ * The browser window stays open after this command exits (without --out).
  */
 
 import { execFileSync, spawn } from "node:child_process";
 import { writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { readSaved } from "../store.js";
 
 const POLL_INTERVAL_MS = 500;
@@ -40,12 +45,28 @@ async function waitForSession(name: string): Promise<void> {
   );
 }
 
-export async function cmdRestore(name: string): Promise<void> {
+export interface RestoreOptions {
+  /** If set, write storageState JSON to this path instead of opening a browser. */
+  out?: string;
+}
+
+export async function cmdRestore(
+  name: string,
+  opts: RestoreOptions = {},
+): Promise<void> {
   const saved = readSaved(name);
   if (!saved) {
     throw new Error(
       `No saved session found for "${name}". Run \`playwright-cli-sessions list\` to see available sessions.`,
     );
+  }
+
+  // --out mode: write storageState to a custom path for Playwright Test
+  if (opts.out) {
+    const outPath = resolve(opts.out);
+    writeFileSync(outPath, JSON.stringify(saved.storageState, null, 2));
+    console.log(`✓ storageState for "${name}" written to ${outPath}`);
+    return;
   }
 
   const tmp = join(tmpdir(), `pwcli-restore-${name}-${Date.now()}.json`);

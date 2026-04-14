@@ -9,12 +9,13 @@
  * Usage:
  *   playwright-cli-sessions list [--probe=false] [--json]
  *   playwright-cli-sessions save <name>
- *   playwright-cli-sessions restore <name>
+ *   playwright-cli-sessions restore <name> [--out=<path>]
  *   playwright-cli-sessions clone <source> <newName>
  *   playwright-cli-sessions tag <name> <service> [identity]
  *   playwright-cli-sessions delete <name>
  *   playwright-cli-sessions probe <name> [--service=X]
  *   playwright-cli-sessions install --skills
+ *   playwright-cli-sessions health
  */
 
 import { cmdList } from "./commands/list.js";
@@ -25,6 +26,7 @@ import { cmdTag } from "./commands/tag.js";
 import { cmdDelete } from "./commands/delete.js";
 import { cmdProbe } from "./commands/probe.js";
 import { cmdInstall } from "./commands/install.js";
+import { cmdHealth } from "./commands/health.js";
 
 const args = process.argv.slice(2);
 
@@ -57,22 +59,24 @@ playwright-cli-sessions — session management layer for @playwright/cli
 Usage:
   playwright-cli-sessions list [--probe=false] [--json]
   playwright-cli-sessions save <name>
-  playwright-cli-sessions restore <name>
+  playwright-cli-sessions restore <name> [--out=<path>]
   playwright-cli-sessions clone <source> <newName>
   playwright-cli-sessions tag <name> <service> [identity]
   playwright-cli-sessions delete <name>
   playwright-cli-sessions probe <name> [--service=X]
   playwright-cli-sessions install --skills
+  playwright-cli-sessions health
 
 Commands:
   list        List saved sessions with live probe status (cached 1h)
   save        Capture auth state from a running playwright-cli session
-  restore     Open a browser session pre-loaded with saved auth state
+  restore     Open a browser session pre-loaded with saved auth state, or write storageState to --out=<path>
   clone       Copy a session under a new name (clone-safety guard applies)
   tag         Manually label a service/identity in a saved session
   delete      Remove a saved session
   probe       Run live HTTP probes for a session's services
   install     Install skill files into <cwd>/.claude/skills/
+  health      Probe all sessions, notify on dead transitions (for LaunchAgent)
 
 Options for list:
   --probe=false   Skip network calls, use cookie-expiry metadata only
@@ -130,11 +134,14 @@ async function main(): Promise<void> {
         const name = rest[0];
         if (!name) {
           console.error(
-            "Error: restore requires a session name.\n  playwright-cli-sessions restore <name>",
+            "Error: restore requires a session name.\n  playwright-cli-sessions restore <name> [--out=<path>]",
           );
           process.exit(1);
         }
-        await cmdRestore(name);
+        const outFlag = flags["out"];
+        await cmdRestore(name, {
+          out: typeof outFlag === "string" ? outFlag : undefined,
+        });
         break;
       }
 
@@ -193,6 +200,11 @@ async function main(): Promise<void> {
 
       case "install": {
         cmdInstall({ skills: flags["skills"] === true });
+        break;
+      }
+
+      case "health": {
+        await cmdHealth();
         break;
       }
 
