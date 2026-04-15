@@ -11,10 +11,10 @@
  * The return value of run() is printed to stdout (string as-is, objects as JSON).
  */
 
-import { chromium } from "playwright";
 import type { BrowserContextOptions, Page } from "playwright";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { launchStealthChrome, STEALTH_INIT_SCRIPT } from "../browser-launch.js";
 import { readSaved } from "../store.js";
 import type { StorageState } from "../store.js";
 
@@ -61,11 +61,12 @@ export async function cmdExec(
     storageState = saved.storageState;
   }
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchStealthChrome({ headless: true });
   try {
     const context = await browser.newContext(
       storageState ? { storageState: asPlaywrightSS(storageState) } : {},
     );
+    await context.addInitScript(STEALTH_INIT_SCRIPT);
     try {
       const page = await context.newPage();
 

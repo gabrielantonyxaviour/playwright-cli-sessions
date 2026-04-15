@@ -8,8 +8,8 @@
  *   playwright-cli-sessions navigate https://github.com --session=gabriel-platforms --snapshot
  */
 
-import { chromium } from "playwright";
 import type { BrowserContextOptions } from "playwright";
+import { launchStealthChrome, STEALTH_INIT_SCRIPT } from "../browser-launch.js";
 import { readSaved } from "../store.js";
 import type { StorageState } from "../store.js";
 
@@ -41,11 +41,12 @@ export async function cmdNavigate(
     storageState = saved.storageState;
   }
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchStealthChrome({ headless: true });
   try {
     const context = await browser.newContext(
       storageState ? { storageState: asPlaywrightSS(storageState) } : {},
     );
+    await context.addInitScript(STEALTH_INIT_SCRIPT);
     try {
       const page = await context.newPage();
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });

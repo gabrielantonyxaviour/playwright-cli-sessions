@@ -12,9 +12,9 @@
  *   playwright-cli-sessions login https://github.com  # auto-names with timestamp
  */
 
-import { chromium } from "playwright";
 import type { BrowserContextOptions } from "playwright";
 import * as readline from "node:readline";
+import { launchStealthChrome, STEALTH_INIT_SCRIPT } from "../browser-launch.js";
 import { readSaved, saveStorageState } from "../store.js";
 import type { StorageState } from "../store.js";
 
@@ -46,11 +46,12 @@ export async function cmdLogin(
   }
 
   console.log(`Opening browser at ${url}...`);
-  const browser = await chromium.launch({ headless: false });
+  const browser = await launchStealthChrome({ headless: false });
   try {
     const context = await browser.newContext(
       storageState ? { storageState: asPlaywrightSS(storageState) } : {},
     );
+    await context.addInitScript(STEALTH_INIT_SCRIPT);
     const page = await context.newPage();
     await page.goto(url);
 
