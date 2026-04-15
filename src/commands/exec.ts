@@ -1,0 +1,94 @@
+/**
+ * exec <script> [<url>] [--session=<name>]
+ *
+ * Run a custom script against a page. The script must export a `run` function:
+ *   export async function run({ page }) { ... return result; }
+ *
+ * Usage:
+ *   playwright-cli-sessions exec /tmp/my-script.mjs https://github.com --session=gabriel-platforms
+ *   playwright-cli-sessions exec /tmp/my-script.mjs  # script navigates itself
+ *
+ * The return value of run() is printed to stdout (string as-is, objects as JSON).
+ */
+
+import { chromium } from "playwright";
+import type { BrowserContextOptions, Page } from "playwright";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { readSaved } from "../store.js";
+import type { StorageState } from "../store.js";
+
+// Our StorageState has `sameSite: string` but Playwright expects the union type.
+// The data is wire-compatible; use this cast helper to bridge the gap.
+type PlaywrightStorageState = NonNullable<
+  BrowserContextOptions["storageState"]
+>;
+const asPlaywrightSS = (ss: StorageState): PlaywrightStorageState =>
+  ss as unknown as PlaywrightStorageState;
+
+export interface ExecOptions {
+  session?: string;
+  url?: string;
+}
+
+interface ScriptModule {
+  run?: (args: { page: Page }) => Promise<unknown>;
+}
+
+export async function cmdExec(
+  scriptPath: string,
+  opts: ExecOptions = {},
+): Promise<void> {
+  // Load and validate the script before launching the browser
+  const absPath = pathToFileURL(resolve(scriptPath)).href;
+  const mod = (await import(absPath)) as ScriptModule;
+  const run = mod.run;
+
+  if (typeof run !== "function") {
+    throw new Error(
+      `Script must export a "run" function:\n  export async function run({ page }) { ... }`,
+    );
+  }
+
+  let storageState: StorageState | undefined;
+  if (opts.session) {
+    const saved = readSaved(opts.session);
+    if (!saved) {
+      throw new Error(
+        `No saved session: "${opts.session}". Run \`playwright-cli-sessions list\` to see available sessions.`,
+      );
+    }
+    storageState = saved.storageState;
+  }
+
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext(
+      storageState ? { storageState: asPlaywrightSS(storageState) } : {},
+    );
+    try {
+      const page = await context.newPage();
+
+      if (opts.url) {
+        await page.goto(opts.url, {
+          waitUntil: "domcontentloaded",
+          timeout: 30000,
+        });
+      }
+
+      const result = await run({ page });
+
+      if (result !== undefined) {
+        if (typeof result === "string") {
+          console.log(result);
+        } else {
+          console.log(JSON.stringify(result, null, 2));
+        }
+      }
+    } finally {
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
+}
