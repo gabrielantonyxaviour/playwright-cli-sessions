@@ -79,23 +79,25 @@ export async function cmdList(opts: ListOptions): Promise<void> {
   }> = [];
 
   if (opts.probe) {
-    // Parallel probes across all sessions
+    // Parallel probes across all sessions.
+    //
+    // Always call getCachedProbeResults with ALL detected services — not just
+    // ones in local PROBE_ENDPOINTS. The shared .probe-cache.json is populated
+    // by both CLI and MCP; if MCP has cached a DEAD result for a service CLI
+    // can't probe itself, we still want to honor it instead of falling through
+    // to cookie metadata (which can show `cookie-valid Nd` for server-invalidated
+    // sessions). Services with no cache entry AND no local probe endpoint get
+    // a "no-probe" result and fall back to cookie metadata in the renderer.
     await Promise.all(
       sessions.map(async (info) => {
-        const services = info.auth
-          .map((a) => a.service)
-          .filter((s) => capableServices.has(s));
-        // Also include no-probe services (will return "no-probe" results)
         const allServices = info.auth.map((a) => a.service);
 
         let probeMap = new Map<string, ProbeResult>();
         const cacheAgeMin = getCacheAgeMinutes(info.name);
 
-        if (services.length > 0) {
+        if (allServices.length > 0) {
           const results = await getCachedProbeResults(
             info.name,
-            // We need to read storageState — listSaved doesn't include it for perf
-            // Re-read from disk for probes
             await readStorageState(info.filePath),
             allServices,
           );

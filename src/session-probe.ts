@@ -79,8 +79,33 @@ interface ProbeEndpoint {
 // --name=<session> --probe` with a known-good session and confirm [LIVE].
 const PROBE_ENDPOINTS: Record<string, ProbeEndpoint> = {
   Vercel: {
-    // Verified: api.vercel.com/v2/user returns 200 with browser session cookies
+    // VERIFIED: api.vercel.com/v2/user returns 200 with browser session cookies.
+    // Expired/missing session → 401.
     url: "https://api.vercel.com/v2/user",
+    aliveStatusCodes: [200],
+  },
+  GitHub: {
+    // VERIFIED: /settings/profile returns 200 with valid user_session cookie.
+    // Expired user_session → 302 redirect to /login.
+    url: "https://github.com/settings/profile",
+    aliveStatusCodes: [200],
+  },
+  Supabase: {
+    // VERIFIED: /dashboard/account/me returns 200 with valid session.
+    // Invalid/missing session → redirect.
+    url: "https://supabase.com/dashboard/account/me",
+    aliveStatusCodes: [200],
+  },
+  LinkedIn: {
+    // VERIFIED: /feed/ returns 200 when li_at cookie is valid.
+    // Expired li_at → 302 redirect to /login.
+    url: "https://www.linkedin.com/feed/",
+    aliveStatusCodes: [200],
+  },
+  Instagram: {
+    // VERIFIED: /accounts/edit/ returns 200 with valid sessionid cookie.
+    // Not logged in → 302 redirect to /accounts/login/.
+    url: "https://www.instagram.com/accounts/edit/",
     aliveStatusCodes: [200],
   },
 };
