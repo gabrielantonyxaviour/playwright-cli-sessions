@@ -16,6 +16,7 @@ import { listSaved } from "../store.js";
 import { HEALTH_LOG_FILE, ensureRoot } from "../store.js";
 import { getCachedProbeResults, flushProbeCache } from "../probe-cache.js";
 import { getProbeCapableServices } from "../session-probe.js";
+import { sendHealthEmail } from "../notify-email.js";
 
 // ── Snapshot types ────────────────────────────────────────────────────
 
@@ -131,14 +132,42 @@ export async function cmdHealth(): Promise<void> {
   const prev = loadLastSnapshot();
   const transitions = diffTransitions(prev, currSnapshot);
 
-  // Notify on newly-dead sessions
+  // Log every transition
   for (const t of transitions) {
-    const msg = `Session "${t.session}" lost auth on ${t.service}`;
-    console.log(`[health] DEAD: ${msg}`);
-    notify("Playwright Session Dead", msg);
+    console.log(
+      `[health] DEAD: Session "${t.session}" lost auth on ${t.service}`,
+    );
   }
 
-  if (transitions.length === 0) {
+  // Notify: prefer email (Resend) when configured; fall back to osascript
+  const emailTo = process.env.PLAYWRIGHT_HEALTH_EMAIL;
+  const resendKey = process.env.RESEND_API_KEY;
+  if (transitions.length > 0) {
+    if (emailTo && resendKey) {
+      const sent = await sendHealthEmail(
+        transitions,
+        currSnapshot,
+        emailTo,
+        resendKey,
+      );
+      if (!sent) {
+        // fallback to osascript on email failure
+        for (const t of transitions) {
+          notify(
+            "Playwright Session Dead",
+            `Session "${t.session}" lost auth on ${t.service}`,
+          );
+        }
+      }
+    } else {
+      for (const t of transitions) {
+        notify(
+          "Playwright Session Dead",
+          `Session "${t.session}" lost auth on ${t.service}`,
+        );
+      }
+    }
+  } else {
     const total = Object.keys(currSnapshot.sessions).length;
     console.log(
       `[health] All ${total} probed session(s) OK — no state transitions.`,
