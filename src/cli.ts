@@ -2,9 +2,9 @@
 /**
  * playwright-cli-sessions — session management layer for @playwright/cli
  *
- * Provides named saved logins, service probes, and clone safety on top of
- * @playwright/cli. Reads/writes ~/.playwright-sessions/ — fully interoperable
- * with the playwright-sessions MCP.
+ * Provides named saved logins, service probes, clone safety, and browser
+ * automation on top of @playwright/cli. Reads/writes ~/.playwright-sessions/ —
+ * fully interoperable with the playwright-sessions MCP.
  *
  * Usage:
  *   playwright-cli-sessions list [--probe=false] [--json]
@@ -16,6 +16,11 @@
  *   playwright-cli-sessions probe <name> [--service=X]
  *   playwright-cli-sessions install --skills
  *   playwright-cli-sessions health
+ *   playwright-cli-sessions screenshot <url> [--session=<name>] [--out=<path>]
+ *   playwright-cli-sessions navigate <url> [--session=<name>] [--snapshot]
+ *   playwright-cli-sessions snapshot <url> [--session=<name>]
+ *   playwright-cli-sessions exec <script> [<url>] [--session=<name>]
+ *   playwright-cli-sessions login <url> [--session=<name>]
  */
 
 import { cmdList } from "./commands/list.js";
@@ -27,6 +32,11 @@ import { cmdDelete } from "./commands/delete.js";
 import { cmdProbe } from "./commands/probe.js";
 import { cmdInstall } from "./commands/install.js";
 import { cmdHealth } from "./commands/health.js";
+import { cmdScreenshot } from "./commands/screenshot.js";
+import { cmdNavigate } from "./commands/navigate.js";
+import { cmdSnapshot } from "./commands/snapshot.js";
+import { cmdExec } from "./commands/exec.js";
+import { cmdLogin } from "./commands/login.js";
 
 const args = process.argv.slice(2);
 
@@ -66,6 +76,11 @@ Usage:
   playwright-cli-sessions probe <name> [--service=X]
   playwright-cli-sessions install --skills
   playwright-cli-sessions health
+  playwright-cli-sessions screenshot <url> [--session=<name>] [--out=<path>]
+  playwright-cli-sessions navigate <url> [--session=<name>] [--snapshot]
+  playwright-cli-sessions snapshot <url> [--session=<name>]
+  playwright-cli-sessions exec <script> [<url>] [--session=<name>]
+  playwright-cli-sessions login <url> [--session=<name>]
 
 Commands:
   list        List saved sessions with live probe status (cached 1h)
@@ -77,6 +92,11 @@ Commands:
   probe       Run live HTTP probes for a session's services
   install     Install skill files into <cwd>/.claude/skills/
   health      Probe all sessions, notify on dead transitions (for LaunchAgent)
+  screenshot  Navigate to a URL and save a PNG screenshot
+  navigate    Navigate to a URL and print page info (optionally with ARIA tree)
+  snapshot    Navigate to a URL and print the ARIA accessibility tree
+  exec        Run a custom script (exports run({ page })) against a page
+  login       Open a browser for interactive login and save the session
 
 Options for list:
   --probe=false   Skip network calls, use cookie-expiry metadata only
@@ -88,7 +108,26 @@ Options for probe:
 Options for install:
   --skills        Copy skill files into .claude/skills/playwright-cli-sessions/
 
+Options for screenshot:
+  --session=<name>  Load a saved session's cookies (optional)
+  --out=<path>      Output PNG path (default: /tmp/screenshot-<ts>.png)
+
+Options for navigate:
+  --session=<name>  Load a saved session's cookies (optional)
+  --snapshot        Also print the ARIA accessibility tree
+
+Options for snapshot:
+  --session=<name>  Load a saved session's cookies (optional)
+
+Options for exec:
+  --session=<name>  Load a saved session's cookies (optional)
+  The second positional argument <url> is optional — the script may navigate itself.
+
+Options for login:
+  --session=<name>  Pre-load an existing session or set the save name
+
 Sessions are stored in ~/.playwright-sessions/ — interoperable with playwright-sessions MCP.
+Note: Browser commands require Chromium. Run \`npx playwright install chromium\` if not installed.
 `.trim(),
   );
 }
@@ -205,6 +244,86 @@ async function main(): Promise<void> {
 
       case "health": {
         await cmdHealth();
+        break;
+      }
+
+      case "screenshot": {
+        const url = rest[0];
+        if (!url) {
+          console.error(
+            "Error: screenshot requires a URL.\n  playwright-cli-sessions screenshot <url> [--session=<name>] [--out=<path>]",
+          );
+          process.exit(1);
+        }
+        const session = flags["session"];
+        const out = flags["out"];
+        await cmdScreenshot(url, {
+          session: typeof session === "string" ? session : undefined,
+          out: typeof out === "string" ? out : undefined,
+        });
+        break;
+      }
+
+      case "navigate": {
+        const url = rest[0];
+        if (!url) {
+          console.error(
+            "Error: navigate requires a URL.\n  playwright-cli-sessions navigate <url> [--session=<name>] [--snapshot]",
+          );
+          process.exit(1);
+        }
+        const session = flags["session"];
+        await cmdNavigate(url, {
+          session: typeof session === "string" ? session : undefined,
+          snapshot: flags["snapshot"] === true,
+        });
+        break;
+      }
+
+      case "snapshot": {
+        const url = rest[0];
+        if (!url) {
+          console.error(
+            "Error: snapshot requires a URL.\n  playwright-cli-sessions snapshot <url> [--session=<name>]",
+          );
+          process.exit(1);
+        }
+        const session = flags["session"];
+        await cmdSnapshot(url, {
+          session: typeof session === "string" ? session : undefined,
+        });
+        break;
+      }
+
+      case "exec": {
+        const scriptPath = rest[0];
+        if (!scriptPath) {
+          console.error(
+            "Error: exec requires a script path.\n  playwright-cli-sessions exec <script> [<url>] [--session=<name>]",
+          );
+          process.exit(1);
+        }
+        const url = rest[1];
+        const session = flags["session"];
+        await cmdExec(scriptPath, {
+          session: typeof session === "string" ? session : undefined,
+          url: url ?? undefined,
+        });
+        break;
+      }
+
+      case "login": {
+        const url = rest[0];
+        if (!url) {
+          console.error(
+            "Error: login requires a URL.\n  playwright-cli-sessions login <url> [--session=<name>]",
+          );
+          process.exit(1);
+        }
+        const session = flags["session"];
+        await cmdLogin(url, {
+          session: typeof session === "string" ? session : undefined,
+        });
         break;
       }
 
