@@ -1,10 +1,9 @@
 /**
- * health — probe all sessions and notify on state transitions (alive → dead).
+ * health — probe all sessions and send a daily attention report.
  *
- * Designed to be run daily via macOS LaunchAgent. Compares current probe
- * results against the last snapshot written to ~/.playwright-sessions/.health.json,
- * fires a macOS notification for each session that newly went dead, then
- * writes the updated snapshot.
+ * Designed to run daily via macOS LaunchAgent. The email is a full snapshot,
+ * not just a transition log, so a session that has been dead since before the
+ * first probe shipped still surfaces for attention.
  *
  * Usage:
  *   playwright-cli-sessions health
@@ -16,17 +15,7 @@ import { listSaved } from "../store.js";
 import { HEALTH_LOG_FILE, ensureRoot } from "../store.js";
 import { getCachedProbeResults, flushProbeCache } from "../probe-cache.js";
 import { getProbeCapableServices } from "../session-probe.js";
-import { sendHealthEmail } from "../notify-email.js";
-
-// ── Snapshot types ────────────────────────────────────────────────────
-
-interface Snapshot {
-  ts: number;
-  sessions: Record<
-    string /* name */,
-    Record<string /* service */, "alive" | "dead" | "unknown">
-  >;
-}
+import { sendHealthEmail, type Snapshot } from "../notify-email.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -78,7 +67,6 @@ function notify(title: string, body: string): void {
       `display notification ${JSON.stringify(body)} with title ${JSON.stringify(title)} sound name "Submarine"`,
     ]);
   } catch {
-    // osascript may not be available in all environments — degrade gracefully
     console.error(`[notify] ${title}: ${body}`);
   }
 }
@@ -89,18 +77,29 @@ export async function cmdHealth(): Promise<void> {
   const sessions = listSaved();
   const capableServices = new Set(getProbeCapableServices());
 
-  const currSnapshot: Snapshot = { ts: Date.now(), sessions: {} };
+  const currSnapshot: Snapshot = {
+    ts: Date.now(),
+    sessions: {},
+    noProbeServices: {},
+  };
 
   // Probe all sessions in parallel
   await Promise.all(
     sessions.map(async (info) => {
-      const probeTargets = info.auth
-        .map((a) => a.service)
-        .filter((s) => capableServices.has(s));
+      const allServices = info.auth.map((a) => a.service);
+      if (allServices.length === 0) return;
 
-      if (probeTargets.length === 0) return;
+      const probeTargets = allServices.filter((s) => capableServices.has(s));
+      const nonProbed = allServices.filter((s) => !capableServices.has(s));
+      if (nonProbed.length > 0) {
+        currSnapshot.noProbeServices![info.name] = nonProbed;
+      }
 
-      // Re-read storageState from disk for probing
+      if (probeTargets.length === 0) {
+        currSnapshot.sessions[info.name] = {};
+        return;
+      }
+
       let storageState: unknown = null;
       try {
         const { readFileSync: rf } = await import("node:fs");
@@ -119,6 +118,13 @@ export async function cmdHealth(): Promise<void> {
       currSnapshot.sessions[info.name] = {};
       for (const r of results) {
         if (r.reason === "no-probe" || r.reason === "no-cookies") continue;
+        // Treat transient network failures as "unknown" — not "dead".
+        // This prevents a single timeout from triggering an alive→dead
+        // transition email. A truly dead cookie returns a definite 302/401.
+        if (r.reason === "timeout" || r.reason === "error") {
+          currSnapshot.sessions[info.name][r.service] = "unknown";
+          continue;
+        }
         currSnapshot.sessions[info.name][r.service] = r.alive
           ? "alive"
           : "dead";
@@ -126,32 +132,41 @@ export async function cmdHealth(): Promise<void> {
     }),
   );
 
-  // One-shot flush after all parallel probes
   flushProbeCache();
 
   const prev = loadLastSnapshot();
   const transitions = diffTransitions(prev, currSnapshot);
 
-  // Log every transition
   for (const t of transitions) {
     console.log(
       `[health] DEAD: Session "${t.session}" lost auth on ${t.service}`,
     );
   }
 
-  // Notify: prefer email (Resend) when configured; fall back to osascript
+  // Decide whether to email: always email if we have an emailTo configured,
+  // regardless of transitions. A stale-dead session is worth surfacing.
   const emailTo = process.env.PLAYWRIGHT_HEALTH_EMAIL;
   const resendKey = process.env.RESEND_API_KEY;
-  if (transitions.length > 0) {
+
+  // Compute zero-live sessions so we can decide fallback behavior.
+  const zeroLiveCount = Object.entries(currSnapshot.sessions).filter(
+    ([, svcs]) =>
+      Object.values(svcs).every((s) => s !== "alive") &&
+      Object.keys(svcs).length > 0,
+  ).length;
+
+  const worthEmailing = transitions.length > 0 || zeroLiveCount > 0;
+
+  if (worthEmailing) {
     if (emailTo && resendKey) {
       const sent = await sendHealthEmail(
         transitions,
         currSnapshot,
+        prev,
         emailTo,
         resendKey,
       );
       if (!sent) {
-        // fallback to osascript on email failure
         for (const t of transitions) {
           notify(
             "Playwright Session Dead",
@@ -170,7 +185,7 @@ export async function cmdHealth(): Promise<void> {
   } else {
     const total = Object.keys(currSnapshot.sessions).length;
     console.log(
-      `[health] All ${total} probed session(s) OK — no state transitions.`,
+      `[health] All ${total} probed session(s) OK — no transitions, no zero-live sessions.`,
     );
   }
 

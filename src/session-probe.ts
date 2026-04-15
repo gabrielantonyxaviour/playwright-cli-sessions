@@ -52,6 +52,12 @@ interface ProbeEndpoint {
   aliveStatusCodes: number[];
   /** Additional headers (rarely needed) */
   headers?: Record<string, string>;
+  /** HTTP method; defaults to GET */
+  method?: string;
+  /** Request body (for POST probes like Notion's /api/v3/loadUserContent) */
+  body?: string;
+  /** Override the 5s default timeout per-service (X/Twitter is slow) */
+  timeoutMs?: number;
 }
 
 // Per-service probe endpoints.
@@ -108,6 +114,57 @@ const PROBE_ENDPOINTS: Record<string, ProbeEndpoint> = {
     url: "https://www.instagram.com/accounts/edit/",
     aliveStatusCodes: [200],
   },
+  Google: {
+    // VERIFIED: Gmail main mailbox view returns 200 when SID/HSID/SSID cookies
+    // are valid. Dead cookies → 302 redirect to accounts.google.com/ServiceLogin.
+    // Note: Google is granular — Gmail alive ≠ YouTube alive, so they are
+    // probed independently.
+    url: "https://mail.google.com/mail/u/0/",
+    aliveStatusCodes: [200],
+  },
+  YouTube: {
+    // VERIFIED: YouTube Studio root returns 200 when LOGIN_INFO and SID cookies
+    // are valid. Dead → 302 redirect to accounts.google.com/ServiceLogin.
+    url: "https://studio.youtube.com/",
+    aliveStatusCodes: [200],
+  },
+  Notion: {
+    // VERIFIED: POST /api/v3/loadUserContent with empty body returns 200 JSON
+    // when token_v2 cookie is valid. Dead → 401. This is the endpoint Notion's
+    // web app uses to bootstrap user data.
+    url: "https://www.notion.so/api/v3/loadUserContent",
+    aliveStatusCodes: [200],
+    method: "POST",
+    body: "{}",
+    headers: { "Content-Type": "application/json" },
+  },
+  "X/Twitter": {
+    // VERIFIED: /home returns 200 when auth_token + ct0 cookies are valid.
+    // Dead → 302 redirect to /i/flow/login. x.com is slow; give it more time.
+    url: "https://x.com/home",
+    aliveStatusCodes: [200],
+    timeoutMs: 10_000,
+  },
+  Neon: {
+    // VERIFIED: /app/projects returns 200 when keycloak session is valid.
+    // Dead → 302 redirect to /sign_in. The /api/v2/ endpoints require a
+    // separate bearer token and cannot be probed with cookies alone.
+    url: "https://console.neon.tech/app/projects",
+    aliveStatusCodes: [200],
+  },
+  "Higgsfield AI": {
+    // VERIFIED: Clerk's /v1/me returns 200 with user JSON when session is
+    // valid. Dead → 401 {"errors":[{"code":"signed_out"}]}. Clerk is the auth
+    // provider for higgsfield.ai so this is the canonical truth.
+    url: "https://clerk.higgsfield.ai/v1/me",
+    aliveStatusCodes: [200],
+  },
+  // NOT PROBEABLE (intentionally omitted):
+  //   - Microsoft: consumer vs work/school SSO means a single HTTP probe
+  //     can't reliably distinguish. Live.com endpoints happily serve 200
+  //     shells regardless of auth. Leave as no-probe.
+  //   - WhatsApp: auth lives in IndexedDB (not captured by storageState) and
+  //     Web.whatsapp.com checks User-Agent aggressively. Browser-only.
 };
 
 function normalizeDomain(d: string): string {
@@ -181,17 +238,19 @@ async function probeOne(
 
   const start = Date.now();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const effectiveTimeout = endpoint.timeoutMs ?? timeoutMs;
+  const timer = setTimeout(() => controller.abort(), effectiveTimeout);
 
   try {
     const res = await fetch(endpoint.url, {
-      method: "GET",
+      method: endpoint.method ?? "GET",
       headers: {
         Cookie: cookieHeader,
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         ...(endpoint.headers || {}),
       },
+      body: endpoint.body,
       signal: controller.signal,
       redirect: "manual", // treat redirects as auth failure
     });
