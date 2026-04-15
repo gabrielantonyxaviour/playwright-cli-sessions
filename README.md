@@ -6,6 +6,8 @@ Session management layer for `@playwright/cli` — named saved logins, live serv
 
 ```bash
 npm install -g playwright-cli-sessions
+# Browser commands require Chromium:
+npx playwright install chromium
 ```
 
 ## Commands
@@ -19,6 +21,11 @@ playwright-cli-sessions tag <name> <service> [identity]
 playwright-cli-sessions delete <name>
 playwright-cli-sessions probe <name> [--service=X]
 playwright-cli-sessions install --skills
+playwright-cli-sessions screenshot <url> [--session=<name>] [--out=<path>]
+playwright-cli-sessions navigate <url> [--session=<name>] [--snapshot]
+playwright-cli-sessions snapshot <url> [--session=<name>]
+playwright-cli-sessions exec <script> [<url>] [--session=<name>]
+playwright-cli-sessions login <url> [--session=<name>]
 ```
 
 ### `list`
@@ -83,6 +90,97 @@ Copy Claude Code skill files into the current project:
 playwright-cli-sessions install --skills
 # → .claude/skills/playwright-cli-sessions/SKILL.md + references/
 ```
+
+## Browser automation (v0.2.0+)
+
+These commands launch a headless Chromium browser directly — no running
+`playwright-cli` instance needed. Pass `--session=<name>` to any command to
+pre-load a saved session's cookies into the browser context.
+
+> **Prerequisite:** run `npx playwright install chromium` once after installing.
+
+### `screenshot <url>`
+
+Take a PNG screenshot of any URL, optionally with a saved session:
+
+```bash
+playwright-cli-sessions screenshot https://github.com --session=gabriel-platforms --out=/tmp/gh.png
+# ✓ Screenshot saved to /tmp/gh.png
+#   Page: GitHub · Build software better, together. — https://github.com/
+```
+
+Options:
+- `--session=<name>` — load a saved session's cookies (optional)
+- `--out=<path>` — output PNG path (default: `/tmp/screenshot-<ts>.png`)
+
+### `navigate <url>`
+
+Navigate to a URL and print page info. Add `--snapshot` to also dump the
+ARIA accessibility tree — useful for building automation scripts:
+
+```bash
+playwright-cli-sessions navigate https://github.com --session=gabriel-platforms --snapshot
+# ✓ Navigated to https://github.com/
+#   Title: GitHub · ...
+# - document:
+#   - banner:
+#     - heading "Navigation Menu" ...
+```
+
+Options:
+- `--session=<name>` — load a saved session's cookies (optional)
+- `--snapshot` — print the ARIA accessibility tree after navigating
+
+### `snapshot <url>`
+
+Print the full ARIA accessibility tree for a URL (shorthand for `navigate --snapshot`):
+
+```bash
+playwright-cli-sessions snapshot https://github.com --session=gabriel-platforms
+```
+
+Options:
+- `--session=<name>` — load a saved session's cookies (optional)
+
+### `exec <script> [<url>]`
+
+Run a custom automation script against a page. The script must export a
+`run({ page })` function and can return a value (printed to stdout):
+
+```js
+// /tmp/my-script.mjs
+export async function run({ page }) {
+  await page.goto("https://github.com");
+  return await page.title();
+}
+```
+
+```bash
+playwright-cli-sessions exec /tmp/my-script.mjs
+# GitHub · Build software better, together. · GitHub
+
+# Or pass a URL to navigate before calling run():
+playwright-cli-sessions exec /tmp/my-script.mjs https://github.com --session=gabriel-platforms
+```
+
+Options:
+- `--session=<name>` — load a saved session's cookies (optional)
+- Second positional argument `<url>` — navigate before calling `run()` (optional; script may navigate itself)
+
+### `login <url>`
+
+Open a real (non-headless) browser, let you log in interactively, then save
+the session. This is the primary way to create new saved sessions:
+
+```bash
+playwright-cli-sessions login https://github.com --session=my-github
+# Opens browser → you log in → press Enter → session saved
+# ✓ Saved session as "my-github" to ~/.playwright-sessions/my-github.json
+#   Detected: GitHub (yourname)
+```
+
+Options:
+- `--session=<name>` — set the save name, and optionally pre-load an existing session as a base
 
 ## Interoperability
 
