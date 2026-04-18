@@ -118,8 +118,9 @@ confirmed `HeadlessChrome/147.0.0.0` in the UA despite `--channel=chrome`.
 
 **Opt-outs:**
 
-| Env var | Effect |
-|---------|--------|
+| Flag / Env var | Effect |
+|----------------|--------|
+| `--channel=chromium` | Explicit opt-out to bundled Chromium (no stealth). |
 | `PLAYWRIGHT_CLI_NO_STEALTH_PATCH=1` | Skip UA rewrite, RTT spoof, and DPR patch. Keeps `--channel=chrome` launch args. Useful for testing your own site's bot-detection pipeline against a raw headless UA. |
 | `PLAYWRIGHT_CLI_BUNDLED=1` | Use the bundled Chrome for Testing (no `--channel=chrome`, no stealth args). For CI servers without real Chrome installed. |
 
@@ -337,6 +338,57 @@ command. Set `PLAYWRIGHT_CLI_SESSIONS_NO_LOG=1` to disable.
 
 The bundled Claude skill (`skills/playwright-cli-sessions/SKILL.md`) tells
 agents: on unexpected behavior, run `report` — do NOT work around the tool.
+
+## Auth-wall detection (v0.4.0+)
+
+Browser commands (`screenshot`, `navigate`, `snapshot`, `exec`, `expect`) automatically detect when navigation lands on a login/auth page instead of the intended destination. When detected:
+
+- **Exit code 77** (`PCS_AUTH_WALL`)
+- A grep-friendly prefix line on stderr: `AUTH_WALL service=<name> session=<name> url=<url> suggest="playwright-cli-sessions login <name>"`
+- A structured error line: `Error [PCS_AUTH_WALL]: auth wall detected at <url>`
+
+```bash
+playwright-cli-sessions navigate https://github.com/settings
+# AUTH_WALL service=github session=(none) url=https://github.com/login?return_to=%2Fsettings suggest="playwright-cli-sessions login my-github"
+# Error [PCS_AUTH_WALL]: auth wall detected at https://github.com/login?return_to=%2Fsettings
+# exit 77
+```
+
+Detection heuristics: URL path matches `/login`, `/signin`, `/sign_in`, `/auth`, `/sso`; query-string contains `?next=`, `?redirect=`, `?returnTo=`; page title matches known auth patterns; Cloudflare challenge title; CAPTCHA iframes. Detection is skipped when the *input* URL itself is a login route (intentional navigation).
+
+## Exit codes (v0.4.0+)
+
+All errors emit a stable `Error [CODE]: message` line on stderr. AI agents should dispatch on exit code, not on prose-parsing of the message.
+
+| Code | Exit | Meaning |
+|------|------|---------|
+| `PCS_AUTH_WALL` | 77 | Auth-wall detected (redirected to login page) |
+| `PCS_AUTH_EXPIRED` | 77 | Session cookies detected as expired server-side |
+| `PCS_SESSION_NOT_FOUND` | 3 | `--session=<name>` file does not exist |
+| `PCS_INVALID_FLAG` | 2 | Unknown or invalid flag value |
+| `PCS_MISSING_ARG` | 2 | Required positional argument missing |
+| `PCS_INVALID_INPUT` | 2 | Script or input file is malformed |
+| `PCS_SELECTOR_TIMEOUT` | 10 | `--wait-for=<selector>` timed out |
+| `PCS_NAV_FAILED` | 11 | `page.goto()` threw (DNS, TCP, protocol error) |
+| `PCS_NETWORK` | 12 | Network-level failure outside navigation |
+| `PCS_BROWSER_CRASH` | 20 | Browser process crashed unexpectedly |
+| `PCS_UNKNOWN` | 1 | Unexpected internal error |
+
+Unknown flags produce a Levenshtein suggestion when the edit distance is ≤ 2:
+
+```bash
+playwright-cli-sessions screenshot https://example.com --waite-for=h1
+# Error [PCS_INVALID_FLAG]: unknown flag 'waite-for'. Did you mean --wait-for?
+# exit 2
+```
+
+## Upgrading from 0.3.x
+
+**Default channel changed.** In 0.3.x, omitting `--channel` used bundled Chromium. In 0.4.0+, omitting `--channel` uses real Chrome (`--channel=chrome`). To restore the old behavior, set `PLAYWRIGHT_CLI_BUNDLED=1` or pass `--channel=chromium`.
+
+**Error format changed.** Errors now emit `Error [CODE]: message` instead of `Error: message`. Update any grep/regex that matched the old format. Exit codes for missing-arg and invalid-flag errors changed from 1 to 2; session-not-found errors changed from 1 to 3. AI agent dispatch loops that previously checked `exit != 0` are unaffected; only loops that checked `exit == 1` specifically need updating.
+
+**New exit 77 for auth-wall.** Add a handler in your shell loops for `exit 77` → prompt the user to run `playwright-cli-sessions login <name>`.
 
 ## Testing
 

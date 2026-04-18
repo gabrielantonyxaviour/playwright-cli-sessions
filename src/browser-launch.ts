@@ -25,8 +25,14 @@
  *   3. Add `--disable-blink-features=AutomationControlled` which flips
  *      `navigator.webdriver` from `true` to `false`.
  *
- * Stealth patch (v0.3.2+, enabled by default when using --channel=chrome)
- * -----------------------------------------------------------------------
+ * Default channel (v0.4.0+)
+ * -------------------------
+ * When no --channel flag is passed (opts.channel undefined), chrome is used
+ * automatically. To opt out, set PLAYWRIGHT_CLI_BUNDLED=1 or pass
+ * --channel=chromium (both route to the bundled Chromium path, no stealth).
+ *
+ * Stealth patch (v0.3.2+, enabled by default when not in bundled mode)
+ * ---------------------------------------------------------------------
  * Even with the above, Playwright's --headless=new mode still emits
  * `HeadlessChrome/<ver>` in both the HTTP User-Agent header and navigator.userAgent.
  * CDN-level bot filters (Cloudflare, Akamai, DataDome, PerimeterX) check the
@@ -81,7 +87,9 @@ export async function launchStealthChrome(
   opts: LaunchOpts = {},
 ): Promise<Browser> {
   const headless = opts.headless ?? true;
-  const bundled = process.env.PLAYWRIGHT_CLI_BUNDLED === "1";
+  // --channel=chromium is an explicit opt-out: treat like PLAYWRIGHT_CLI_BUNDLED=1
+  const bundled =
+    process.env.PLAYWRIGHT_CLI_BUNDLED === "1" || opts.channel === "chromium";
 
   if (bundled) {
     return chromium.launch({
@@ -165,8 +173,9 @@ function buildStealthUA(version: string): string {
 export async function createStealthContext(
   browser: Browser,
   baseOpts: BrowserContextOptions = {},
+  bundledOverride?: boolean,
 ): Promise<BrowserContext> {
-  const bundled = process.env.PLAYWRIGHT_CLI_BUNDLED === "1";
+  const bundled = bundledOverride ?? process.env.PLAYWRIGHT_CLI_BUNDLED === "1";
   const noPatch = process.env.PLAYWRIGHT_CLI_NO_STEALTH_PATCH === "1";
   const shouldPatch = !bundled && !noPatch;
 

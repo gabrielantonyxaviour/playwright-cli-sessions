@@ -50,4 +50,4 @@ rc=0
 out_nourl="$(node "$CLI_JS" snapshot 2>&1)" || rc=$?
 [[ $rc -ne 0 ]] || _assert_fail "snapshot without URL should fail but exited 0"
 _assert_ok "snapshot without URL exits non-zero (rc=$rc)"
-assert_contains "$out_nourl" "Error: snapshot requires a URL" "missing URL error message"
+assert_contains "$out_nourl" "snapshot requires a URL" "missing URL error message"

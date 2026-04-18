@@ -174,7 +174,7 @@ rc=0
 out7="$(node "$CLI_JS" exec 2>&1)" || rc=$?
 [[ $rc -ne 0 ]] || _assert_fail "exec with no script path should fail but exited 0"
 _assert_ok "exec with no script path exits non-zero (rc=$rc)"
-assert_contains "$out7" "Error: exec requires a script path" "missing script path error message"
+assert_contains "$out7" "exec requires a script path" "missing script path error message"
 
 # ── 8. Script without a run() export ──────────────────────────────────
 # exec.ts (lines 60-64) throws:

@@ -92,13 +92,13 @@ assert_not_contains "$out" "selector:" "passing --selector is not listed as a fa
 # ── 11. Missing URL ───────────────────────────────────────────────────
 rc=0
 out="$(timeout 10 node "$CLI_JS" expect 2>&1)" || rc=$?
-assert_exit_code 1 "$rc" "no URL exits 1"
+assert_exit_code 2 "$rc" "no URL exits 2"
 assert_contains "$out" "expect requires a URL" "no URL error message is clear"
 
 # ── 12. No expectation flags ──────────────────────────────────────────
 rc=0
 out="$(timeout 10 node "$CLI_JS" expect "$URL" 2>&1)" || rc=$?
-assert_exit_code 1 "$rc" "no expectation flags exits 1"
+assert_exit_code 2 "$rc" "no expectation flags exits 2"
 assert_contains "$out" "requires at least one of --title, --selector, --text, or --status" \
   "missing-expectation error enumerates the valid flags"
 

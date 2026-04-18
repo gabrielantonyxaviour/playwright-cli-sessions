@@ -26,6 +26,7 @@ import {
 } from "../browser-launch.js";
 import { readSaved, saveStorageState } from "../store.js";
 import type { StorageState } from "../store.js";
+import { PcsError } from "../errors.js";
 
 type PlaywrightStorageState = NonNullable<
   BrowserContextOptions["storageState"]
@@ -44,15 +45,19 @@ export async function cmdRefresh(
 ): Promise<void> {
   const existing = readSaved(name);
   if (!existing) {
-    throw new Error(
+    throw new PcsError(
+      "PCS_SESSION_NOT_FOUND",
       `No saved session: "${name}". Use \`login\` to create a new session, or \`list\` to see existing ones.`,
+      { session: name },
     );
   }
 
   const url = opts.url ?? existing.lastUrl;
   if (!url) {
-    throw new Error(
+    throw new PcsError(
+      "PCS_MISSING_ARG",
       `Session "${name}" has no lastUrl. Provide --url=<url> to specify where to navigate.`,
+      { session: name },
     );
   }
 
@@ -61,10 +66,14 @@ export async function cmdRefresh(
     headless: false,
     channel: opts.channel,
   });
+  const bundled =
+    process.env.PLAYWRIGHT_CLI_BUNDLED === "1" || opts.channel === "chromium";
   try {
-    const context = await createStealthContext(browser, {
-      storageState: asPlaywrightSS(existing.storageState),
-    });
+    const context = await createStealthContext(
+      browser,
+      { storageState: asPlaywrightSS(existing.storageState) },
+      bundled,
+    );
     const page = await context.newPage();
     await page.goto(url);
 

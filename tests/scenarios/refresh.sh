@@ -19,7 +19,7 @@ rc=0
 out1="$(node "$CLI_JS" refresh 2>&1)" || rc=$?
 [[ $rc -ne 0 ]] || _assert_fail "refresh without name should fail but exited 0"
 _assert_ok "refresh without name exits non-zero (rc=$rc)"
-assert_contains "$out1" "Error: refresh requires a session name" "missing name error message"
+assert_contains "$out1" "refresh requires a session name" "missing name error message"
 
 # ── 2. Nonexistent session ────────────────────────────────────────────
 # No file at $PLAYWRIGHT_SESSIONS_DIR/ghost.json → readSaved returns null

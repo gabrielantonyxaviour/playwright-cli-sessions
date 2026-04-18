@@ -15,6 +15,8 @@ import {
 } from "../browser-launch.js";
 import { readSaved } from "../store.js";
 import type { StorageState } from "../store.js";
+import { PcsError } from "../errors.js";
+import { checkAuthWall } from "../auth-wall.js";
 
 // Our StorageState has `sameSite: string` but Playwright expects the union type.
 // The data is wire-compatible; use this cast helper to bridge the gap.
@@ -41,8 +43,10 @@ export async function cmdNavigate(
   if (opts.session) {
     const saved = readSaved(opts.session);
     if (!saved) {
-      throw new Error(
+      throw new PcsError(
+        "PCS_SESSION_NOT_FOUND",
         `No saved session: "${opts.session}". Run \`playwright-cli-sessions list\` to see available sessions.`,
+        { session: opts.session },
       );
     }
     storageState = saved.storageState;
@@ -52,20 +56,40 @@ export async function cmdNavigate(
     headless: !opts.headed,
     channel: opts.channel,
   });
+  const bundled =
+    process.env.PLAYWRIGHT_CLI_BUNDLED === "1" || opts.channel === "chromium";
   try {
     const context = await createStealthContext(
       browser,
       storageState ? { storageState: asPlaywrightSS(storageState) } : {},
+      bundled,
     );
     try {
       const page = await context.newPage();
-      await page.goto(url, {
-        waitUntil: opts.waitUntil ?? "domcontentloaded",
-        timeout: 30000,
-      });
-      if (opts.waitFor) {
-        await page.waitForSelector(opts.waitFor, { timeout: 30000 });
+      try {
+        await page.goto(url, {
+          waitUntil: opts.waitUntil ?? "domcontentloaded",
+          timeout: 30000,
+        });
+      } catch (navErr) {
+        throw new PcsError(
+          "PCS_NAV_FAILED",
+          (navErr as Error).message.split("\n")[0],
+          { url },
+        );
       }
+      if (opts.waitFor) {
+        try {
+          await page.waitForSelector(opts.waitFor, { timeout: 30000 });
+        } catch (selErr) {
+          throw new PcsError(
+            "PCS_SELECTOR_TIMEOUT",
+            (selErr as Error).message.split("\n")[0],
+            { selector: opts.waitFor },
+          );
+        }
+      }
+      await checkAuthWall(page, url, { session: opts.session });
       const title = await page.title();
       console.log(`✓ Navigated to ${page.url()}`);
       console.log(`  Title: ${title}`);

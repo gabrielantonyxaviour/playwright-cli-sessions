@@ -12,6 +12,7 @@
 import { readSaved } from "../store.js";
 import { getCachedProbeResults } from "../probe-cache.js";
 import { getProbeCapableServices } from "../session-probe.js";
+import { PcsError } from "../errors.js";
 
 interface ProbeOptions {
   service?: string;
@@ -23,8 +24,10 @@ export async function cmdProbe(
 ): Promise<void> {
   const session = readSaved(name);
   if (!session) {
-    throw new Error(
+    throw new PcsError(
+      "PCS_SESSION_NOT_FOUND",
       `No saved session found for "${name}". Run \`playwright-cli-sessions list\` to see available sessions.`,
+      { session: name },
     );
   }
 

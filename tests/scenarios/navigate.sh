@@ -72,4 +72,4 @@ rc=0
 out_nourl="$(node "$CLI_JS" navigate 2>&1)" || rc=$?
 [[ $rc -ne 0 ]] || _assert_fail "navigate without URL should fail but exited 0"
 _assert_ok "navigate without URL exits non-zero (rc=$rc)"
-assert_contains "$out_nourl" "Error: navigate requires a URL" "missing URL error message"
+assert_contains "$out_nourl" "navigate requires a URL" "missing URL error message"

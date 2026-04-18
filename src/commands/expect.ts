@@ -9,9 +9,8 @@
  *     playwright-cli-sessions expect https://example.com --title="Example Domain"
  *     playwright-cli-sessions expect https://gh.com --session=x --selector="main"
  *
- *   Exits 0 on success, 1 on assertion failure, 2 on infrastructure error
- *   (browser launch, navigation, missing session). Failure output lists each
- *   expectation that was not met.
+ *   Exits 0 on success, 1 on assertion failure. Infrastructure errors (bad
+ *   session, auth wall, nav failure) propagate as PcsErrors (exit 77/11/3/etc).
  *
  * Expectations (any combination):
  *   --title=<substr>      page.title() must contain <substr>
@@ -33,6 +32,8 @@ import {
 } from "../browser-launch.js";
 import { readSaved } from "../store.js";
 import type { StorageState } from "../store.js";
+import { PcsError } from "../errors.js";
+import { checkAuthWall } from "../auth-wall.js";
 import { dirname } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
 
@@ -59,7 +60,8 @@ export interface ExpectOptions {
 
 /**
  * Run all assertions against a freshly loaded page. Returns the list of
- * failure messages (empty on success).
+ * failure messages (empty on success). PcsErrors (auth wall, nav failure, etc.)
+ * propagate out — they are not treated as assertion failures.
  */
 async function runOnce(
   url: string,
@@ -71,10 +73,13 @@ async function runOnce(
     headless: !opts.headed,
     channel: opts.channel,
   });
+  const bundled =
+    process.env.PLAYWRIGHT_CLI_BUNDLED === "1" || opts.channel === "chromium";
   try {
     const context = await createStealthContext(
       browser,
       storageState ? { storageState: asPlaywrightSS(storageState) } : {},
+      bundled,
     );
     const page = await context.newPage();
 
@@ -101,6 +106,9 @@ async function runOnce(
         };
       }
     }
+
+    // Auth wall check — throws PcsError(PCS_AUTH_WALL) if detected, propagates up
+    await checkAuthWall(page, url, { session: opts.session });
 
     const failures: string[] = [];
 
@@ -171,7 +179,8 @@ export async function cmdExpect(
     opts.text === undefined &&
     opts.status === undefined
   ) {
-    throw new Error(
+    throw new PcsError(
+      "PCS_MISSING_ARG",
       "expect requires at least one of --title, --selector, --text, or --status.",
     );
   }
@@ -180,8 +189,10 @@ export async function cmdExpect(
   if (opts.session) {
     const saved = readSaved(opts.session);
     if (!saved) {
-      throw new Error(
+      throw new PcsError(
+        "PCS_SESSION_NOT_FOUND",
         `No saved session: "${opts.session}". Run \`playwright-cli-sessions list\` to see available sessions.`,
+        { session: opts.session },
       );
     }
     storageState = saved.storageState;

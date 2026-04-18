@@ -156,16 +156,52 @@ didn't ask for.
 If in doubt: stay headless. The human can always re-run with `--headed` if
 they want to watch. You cannot take back a visible window they didn't want.
 
-## Stealth (v0.3.2+)
+## Stealth (v0.3.2+) — Chrome default (v0.4.0+)
 
-Browser automation commands automatically patch the fingerprint to remove
-`HeadlessChrome` from the User-Agent, spoof `navigator.connection.rtt` to a
-realistic non-zero value, and set `devicePixelRatio` to match the host OS (2 on
-macOS, 1 elsewhere). Validated against a real Tinder signup test on 2026-04-18.
+Browser automation commands default to real Chrome (`--channel=chrome`) and
+automatically patch the fingerprint to remove `HeadlessChrome` from the
+User-Agent, spoof `navigator.connection.rtt`, and set `devicePixelRatio` to
+match the host OS (2 on macOS, 1 elsewhere).
 
-**Opt-outs (env vars):**
+**Opt-outs:**
+- `--channel=chromium` — use bundled Chrome for Testing (no stealth)
 - `PLAYWRIGHT_CLI_NO_STEALTH_PATCH=1` — skip UA/RTT/DPR patches; keep `--channel=chrome`
 - `PLAYWRIGHT_CLI_BUNDLED=1` — skip all stealth; use bundled Chrome for Testing
+
+## Auth-wall detection (v0.4.0+)
+
+Browser commands auto-detect when navigation lands on a login/auth page instead
+of the intended destination. On detection: **exit 77** + a grep-friendly prefix
+line on stderr:
+
+```
+AUTH_WALL service=github session=(none) url=https://github.com/login?... suggest="playwright-cli-sessions login my-github"
+Error [PCS_AUTH_WALL]: auth wall detected at https://github.com/login?...
+```
+
+**Handle exit 77 in your loop** — prompt the user to run `playwright-cli-sessions login <name>`. Do NOT retry the same command; the session is missing or expired.
+
+Detection is skipped when the *input* URL itself is a login route (intentional navigation to a login page never fires AUTH_WALL).
+
+## Exit codes (v0.4.0+)
+
+All errors emit `Error [CODE]: message` on stderr. Dispatch on exit code:
+
+| Exit | Code | Meaning |
+|------|------|---------|
+| 77 | `PCS_AUTH_WALL` | Redirected to a login page — session missing or expired |
+| 77 | `PCS_AUTH_EXPIRED` | Session cookies expired server-side |
+| 3 | `PCS_SESSION_NOT_FOUND` | `--session=<name>` file does not exist |
+| 2 | `PCS_INVALID_FLAG` / `PCS_MISSING_ARG` | Bad or missing argument |
+| 10 | `PCS_SELECTOR_TIMEOUT` | `--wait-for=<selector>` timed out |
+| 11 | `PCS_NAV_FAILED` | `page.goto()` threw (DNS/TCP/protocol error) |
+| 1 | `PCS_UNKNOWN` | Unexpected internal error |
+
+Unknown flags get a Levenshtein suggestion when edit-distance ≤ 2:
+```bash
+playwright-cli-sessions screenshot https://example.com --waite-for=h1
+# Error [PCS_INVALID_FLAG]: unknown flag 'waite-for'. Did you mean --wait-for?
+```
 
 ## Browser automation commands
 
@@ -220,8 +256,8 @@ Scripts can `import` anything, reference helper files, use any Playwright API.
 
 ### expect — shell-native assertions
 
-For tests and sanity checks, `expect` returns exit 0/1 based on declared
-expectations — no `.mjs` file needed:
+For tests and sanity checks, `expect` returns exit 0 (pass) or 1 (expectations
+not met) or 2 (missing/invalid argument) — no `.mjs` file needed:
 
 ```bash
 playwright-cli-sessions expect https://example.com --title="Example Domain"

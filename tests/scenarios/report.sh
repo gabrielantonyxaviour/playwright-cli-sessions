@@ -100,7 +100,7 @@ assert_json_has "$json_list" ".[0].invokedBy" "json entry has .invokedBy"
 # ── 7. Empty message → usage error ────────────────────────────────────
 rc=0
 out_err="$(PCS report "" 2>&1)" || rc=$?
-assert_exit_code 1 "$rc" "empty report exits 1"
+assert_exit_code 2 "$rc" "empty report exits 2"
 assert_contains "$out_err" "requires a message" "empty report explains the rule"
 # Must NOT have created a new report file.
 shopt -s nullglob

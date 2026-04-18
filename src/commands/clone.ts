@@ -9,6 +9,7 @@
  */
 
 import { readSaved, cloneSession, saveStorageState } from "../store.js";
+import { PcsError } from "../errors.js";
 
 interface CloneOptions {
   overwriteSource?: boolean;
@@ -21,13 +22,19 @@ export async function cmdClone(
 ): Promise<void> {
   const src = readSaved(srcName);
   if (!src) {
-    throw new Error(`No saved session found for "${srcName}".`);
+    throw new PcsError(
+      "PCS_SESSION_NOT_FOUND",
+      `No saved session found for "${srcName}".`,
+      { session: srcName },
+    );
   }
 
   const existingDst = readSaved(dstName);
   if (existingDst && !opts.overwriteSource) {
-    throw new Error(
+    throw new PcsError(
+      "PCS_INVALID_INPUT",
       `Session "${dstName}" already exists. Use a different name, or pass --overwrite-source to replace it.`,
+      { session: dstName },
     );
   }
 
@@ -59,10 +66,12 @@ export function assertNotClone(name: string, overwriteSource?: string): void {
     return;
   }
 
-  throw new Error(
+  throw new PcsError(
+    "PCS_INVALID_INPUT",
     `"${name}" is a clone of "${session.cloneOf}". ` +
       `Saving a clone is not allowed — it would silently diverge from the source.\n` +
       `To refresh the source with this clone's state, run:\n` +
       `  playwright-cli-sessions save ${name} --overwrite-source=${session.cloneOf}`,
+    { session: name, cloneOf: session.cloneOf },
   );
 }

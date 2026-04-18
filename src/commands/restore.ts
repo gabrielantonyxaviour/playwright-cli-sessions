@@ -22,6 +22,7 @@ import { writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { readSaved } from "../store.js";
+import { PcsError } from "../errors.js";
 
 const POLL_INTERVAL_MS = 500;
 const POLL_TIMEOUT_MS = 15_000;
@@ -56,8 +57,10 @@ export async function cmdRestore(
 ): Promise<void> {
   const saved = readSaved(name);
   if (!saved) {
-    throw new Error(
+    throw new PcsError(
+      "PCS_SESSION_NOT_FOUND",
       `No saved session found for "${name}". Run \`playwright-cli-sessions list\` to see available sessions.`,
+      { session: name },
     );
   }
 

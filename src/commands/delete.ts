@@ -3,12 +3,15 @@
  */
 
 import { deleteSaved, readSaved } from "../store.js";
+import { PcsError } from "../errors.js";
 
 export function cmdDelete(name: string): void {
   const session = readSaved(name);
   if (!session) {
-    throw new Error(
+    throw new PcsError(
+      "PCS_SESSION_NOT_FOUND",
       `No saved session found for "${name}". Run \`playwright-cli-sessions list\` to see available sessions.`,
+      { session: name },
     );
   }
 
@@ -16,6 +19,8 @@ export function cmdDelete(name: string): void {
   if (deleted) {
     console.log(`✓ Deleted session "${name}"`);
   } else {
-    throw new Error(`Failed to delete session "${name}".`);
+    throw new PcsError("PCS_UNKNOWN", `Failed to delete session "${name}".`, {
+      session: name,
+    });
   }
 }

@@ -78,7 +78,7 @@ out5="$(timeout 60 node "$CLI_JS" screenshot "$URL" --wait-for="#no-such-element
   echo "$out5" >&2
   exit 1
 }
-assert_contains "$out5" "Error:" "missing-selector timeout prints Error:"
+assert_contains "$out5" "Error [" "missing-selector timeout prints error code"
 # Playwright's timeout message includes "Timeout" — case-insensitive match via lowercased copy.
 out5_lc="$(printf '%s' "$out5" | tr '[:upper:]' '[:lower:]')"
 assert_contains "$out5_lc" "timeout" "missing-selector error mentions timeout"
@@ -107,7 +107,7 @@ assert_contains "$out7" "commit" "invalid --wait-until lists 'commit'"
 rc=0
 out8="$(timeout 10 node "$CLI_JS" screenshot 2>&1)" || rc=$?
 [[ "$rc" != "0" ]] || { echo "missing URL unexpectedly succeeded" >&2; echo "$out8" >&2; exit 1; }
-assert_contains "$out8" "Error: screenshot requires a URL" "missing URL prints exact error message"
+assert_contains "$out8" "screenshot requires a URL" "missing URL prints error message"
 
 # ── 9. Default --out path (no --out) → /tmp/screenshot-<ts>.png ─────────────
 # The code path: `resolve(tmpdir(), "screenshot-${Date.now()}.png")`.

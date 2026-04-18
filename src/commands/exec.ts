@@ -25,6 +25,7 @@ import {
 } from "../browser-launch.js";
 import { readSaved } from "../store.js";
 import type { StorageState } from "../store.js";
+import { PcsError } from "../errors.js";
 
 // Our StorageState has `sameSite: string` but Playwright expects the union type.
 // The data is wire-compatible; use this cast helper to bridge the gap.
@@ -61,8 +62,10 @@ export async function cmdExec(
   const run = mod.run;
 
   if (typeof run !== "function") {
-    throw new Error(
+    throw new PcsError(
+      "PCS_INVALID_INPUT",
       `Script must export a "run" function:\n  export async function run({ page, context, browser }) { ... }`,
+      { scriptPath },
     );
   }
 
@@ -70,8 +73,10 @@ export async function cmdExec(
   if (opts.session) {
     const saved = readSaved(opts.session);
     if (!saved) {
-      throw new Error(
+      throw new PcsError(
+        "PCS_SESSION_NOT_FOUND",
         `No saved session: "${opts.session}". Run \`playwright-cli-sessions list\` to see available sessions.`,
+        { session: opts.session },
       );
     }
     storageState = saved.storageState;
@@ -81,10 +86,13 @@ export async function cmdExec(
     headless: !opts.headed,
     channel: opts.channel,
   });
+  const bundled =
+    process.env.PLAYWRIGHT_CLI_BUNDLED === "1" || opts.channel === "chromium";
   try {
     const context = await createStealthContext(
       browser,
       storageState ? { storageState: asPlaywrightSS(storageState) } : {},
+      bundled,
     );
     try {
       const page = await context.newPage();

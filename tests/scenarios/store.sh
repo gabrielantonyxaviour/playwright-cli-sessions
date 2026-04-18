@@ -77,7 +77,7 @@ assert_eq "user_session" \
 # 4. Clone missing source errors with a clear message.
 rc=0
 clone_err="$(PCS clone no-such-source new-name 2>&1)" || rc=$?
-assert_exit_code "1" "$rc" "clone missing source exits non-zero"
+assert_exit_code "3" "$rc" "clone missing source exits non-zero"
 assert_contains "$clone_err" "No saved session" "clone missing source error message"
 [[ ! -f "$PLAYWRIGHT_SESSIONS_DIR/new-name.json" ]] || {
   echo "clone of missing source still wrote new-name.json" >&2
@@ -127,8 +127,8 @@ assert_eq "true" \
 # 8. Tag with only a name (missing service) errors.
 rc=0
 tag_err="$(PCS tag only-name-no-service 2>&1)" || rc=$?
-assert_exit_code "1" "$rc" "tag missing service exits non-zero"
-assert_contains "$tag_err" "Error: tag requires" "tag missing service error message"
+assert_exit_code "2" "$rc" "tag missing service exits non-zero"
+assert_contains "$tag_err" "tag requires" "tag missing service error message"
 
 # 8b. Regression: tag writes back to the FILENAME even if the embedded
 # `.name` field disagrees (e.g. after a manual rename on disk). Before the
@@ -172,7 +172,7 @@ PCS delete victim >/dev/null
 # 10. Delete a missing session errors with a clear message.
 rc=0
 del_err="$(PCS delete ghost 2>&1)" || rc=$?
-assert_exit_code "1" "$rc" "delete missing session exits non-zero"
+assert_exit_code "3" "$rc" "delete missing session exits non-zero"
 assert_contains "$del_err" "No saved session" "delete missing error message"
 
 # ── probe ─────────────────────────────────────────────────────────────
@@ -180,13 +180,13 @@ assert_contains "$del_err" "No saved session" "delete missing error message"
 # 11. Probe with no positional arg errors.
 rc=0
 probe_err="$(PCS probe 2>&1)" || rc=$?
-assert_exit_code "1" "$rc" "probe missing name exits non-zero"
-assert_contains "$probe_err" "Error: probe requires a session name" "probe missing-name error"
+assert_exit_code "2" "$rc" "probe missing name exits non-zero"
+assert_contains "$probe_err" "probe requires a session name" "probe missing-name error"
 
 # 12. Probe of a nonexistent session errors.
 rc=0
 probe_err2="$(PCS probe ghost 2>&1)" || rc=$?
-assert_exit_code "1" "$rc" "probe nonexistent session exits non-zero"
+assert_exit_code "3" "$rc" "probe nonexistent session exits non-zero"
 assert_contains "$probe_err2" "No saved session" "probe nonexistent error"
 
 # 13. Probe on a session with no detected services exits 0 and announces so —
@@ -212,7 +212,7 @@ assert_json_has "$out_path" ".origins" "restore --out has .origins"
 # 15. Restore on a missing session errors.
 rc=0
 rest_err="$(PCS restore ghost 2>&1)" || rc=$?
-assert_exit_code "1" "$rc" "restore missing session exits non-zero"
+assert_exit_code "3" "$rc" "restore missing session exits non-zero"
 assert_contains "$rest_err" "No saved session" "restore missing error message"
 
 # ── save ──────────────────────────────────────────────────────────────

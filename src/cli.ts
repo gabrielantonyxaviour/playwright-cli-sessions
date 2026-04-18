@@ -45,6 +45,8 @@ import { cmdLogin } from "./commands/login.js";
 import { cmdRefresh } from "./commands/refresh.js";
 import { cmdReport, cmdReports } from "./commands/report.js";
 import { cmdExpect } from "./commands/expect.js";
+import { PcsError, EXIT_CODE_MAP } from "./errors.js";
+import { levenshtein } from "./levenshtein.js";
 
 const args = process.argv.slice(2);
 
@@ -69,6 +71,87 @@ function parseFlags(argv: string[]): {
   return { positional, flags };
 }
 
+// Per-command accepted flag names — used for unknown-flag rejection.
+const COMMAND_FLAGS: Record<string, string[]> = {
+  list: ["probe", "json"],
+  save: [],
+  restore: ["out"],
+  clone: ["overwrite-source"],
+  tag: [],
+  delete: [],
+  probe: ["service"],
+  install: ["skills"],
+  health: [],
+  screenshot: [
+    "session",
+    "out",
+    "headed",
+    "channel",
+    "wait-for",
+    "wait-until",
+    "full-page",
+  ],
+  navigate: [
+    "session",
+    "snapshot",
+    "headed",
+    "channel",
+    "wait-for",
+    "wait-until",
+  ],
+  snapshot: ["session", "headed", "channel", "wait-for", "wait-until"],
+  exec: ["session", "url", "headed", "channel", "wait-for", "wait-until"],
+  login: ["session", "channel"],
+  refresh: ["url", "channel"],
+  expect: [
+    "title",
+    "selector",
+    "text",
+    "status",
+    "timeout",
+    "retry",
+    "session",
+    "channel",
+    "wait-for",
+    "wait-until",
+    "screenshot-on-fail",
+    "headed",
+  ],
+  report: ["context", "no-notify"],
+  reports: ["limit", "json"],
+};
+
+/** Return the closest known flag if within edit-distance 2, else undefined. */
+function suggestFlag(unknown: string, known: string[]): string | undefined {
+  let best: string | undefined;
+  let bestDist = Infinity;
+  for (const k of known) {
+    const d = levenshtein(unknown, k);
+    if (d < bestDist) {
+      bestDist = d;
+      best = k;
+    }
+  }
+  return bestDist <= 2 ? best : undefined;
+}
+
+/** Throw PcsError(PCS_INVALID_FLAG) for any flag not in the whitelist. */
+function validateFlags(
+  command: string,
+  flags: Record<string, string | boolean>,
+  whitelist: string[],
+): void {
+  for (const flag of Object.keys(flags)) {
+    if (!whitelist.includes(flag)) {
+      const suggestion = suggestFlag(flag, whitelist);
+      const msg = suggestion
+        ? `unknown flag '--${flag}'. Did you mean '--${suggestion}'?`
+        : `unknown flag '--${flag}' for '${command}'. See --help.`;
+      throw new PcsError("PCS_INVALID_FLAG", msg, { flag, command });
+    }
+  }
+}
+
 type WaitUntil = "load" | "domcontentloaded" | "networkidle" | "commit";
 const VALID_WAIT_UNTIL: ReadonlyArray<WaitUntil> = [
   "load",
@@ -83,8 +166,10 @@ function parseWaitUntil(
   if ((VALID_WAIT_UNTIL as ReadonlyArray<string>).includes(value)) {
     return value as WaitUntil;
   }
-  throw new Error(
+  throw new PcsError(
+    "PCS_INVALID_FLAG",
     `Invalid --wait-until="${value}". Valid values: ${VALID_WAIT_UNTIL.join(", ")}`,
+    { flag: "wait-until", value },
   );
 }
 
@@ -137,7 +222,7 @@ Options for screenshot:
   --session=<name>      Load a saved session's cookies (optional)
   --out=<path>          Output PNG path (default: /tmp/screenshot-<ts>.png; parent dir auto-created)
   --headed              Open a visible browser window (default: headless)
-  --channel=<channel>   Browser channel: "chrome" (default), "msedge", etc.
+  --channel=<channel>   Browser channel: "chrome" (default), "chromium" (bundled), "msedge", etc.
   --wait-for=<selector> CSS selector to wait for after navigation (recommended to avoid blank captures)
   --wait-until=<event>  Playwright waitUntil: load | domcontentloaded (default) | networkidle | commit
   --full-page           Capture the full scrollable page (default: viewport only)
@@ -146,21 +231,21 @@ Options for navigate:
   --session=<name>      Load a saved session's cookies (optional)
   --snapshot            Also print the ARIA accessibility tree
   --headed              Open a visible browser window (default: headless)
-  --channel=<channel>   Browser channel: "chrome" (default), "msedge", etc.
+  --channel=<channel>   Browser channel: "chrome" (default), "chromium" (bundled), "msedge", etc.
   --wait-for=<selector> CSS selector to wait for after navigation
   --wait-until=<event>  Playwright waitUntil: load | domcontentloaded (default) | networkidle | commit
 
 Options for snapshot:
   --session=<name>      Load a saved session's cookies (optional)
   --headed              Open a visible browser window (default: headless)
-  --channel=<channel>   Browser channel: "chrome" (default), "msedge", etc.
+  --channel=<channel>   Browser channel: "chrome" (default), "chromium" (bundled), "msedge", etc.
   --wait-for=<selector> CSS selector to wait for after navigation
   --wait-until=<event>  Playwright waitUntil: load | domcontentloaded (default) | networkidle | commit
 
 Options for exec:
   --session=<name>      Load a saved session's cookies (optional)
   --headed              Open a visible browser window (default: headless)
-  --channel=<channel>   Browser channel: "chrome" (default), "msedge", etc.
+  --channel=<channel>   Browser channel: "chrome" (default), "chromium" (bundled), "msedge", etc.
   --wait-for=<selector> CSS selector to wait for after navigation (only applies when <url> is given)
   --wait-until=<event>  Playwright waitUntil: load | domcontentloaded (default) | networkidle | commit
   Script must export: async function run({ page, context, browser }) { ... }
@@ -168,11 +253,11 @@ Options for exec:
 
 Options for login:
   --session=<name>    Pre-load an existing session or set the save name
-  --channel=<channel> Browser channel: "chrome" (default), "msedge", etc.
+  --channel=<channel> Browser channel: "chrome" (default), "chromium" (bundled), "msedge", etc.
 
 Options for refresh:
   --url=<url>         URL to navigate to (default: session's lastUrl)
-  --channel=<channel> Browser channel: "chrome" (default), "msedge", etc.
+  --channel=<channel> Browser channel: "chrome" (default), "chromium" (bundled), "msedge", etc.
 
 Options for expect:
   --title=<substr>       page.title() must contain <substr>
@@ -182,7 +267,7 @@ Options for expect:
   --timeout=<ms>         max ms to wait for any single expectation (default 10000)
   --retry=<N>            retry the whole check N more times on failure (default 0)
   --session=<name>       Load a saved session's cookies
-  --channel=<channel>    Browser channel: "chrome" (default), "msedge", etc.
+  --channel=<channel>    Browser channel: "chrome" (default), "chromium" (bundled), "msedge", etc.
   --wait-for=<selector>  CSS selector to wait for after navigation (pre-check)
   --wait-until=<event>   Playwright waitUntil: load | domcontentloaded | networkidle | commit
   --screenshot-on-fail=<path>  Save a full-page screenshot if the check ultimately fails
@@ -196,6 +281,22 @@ Options for report:
 Options for reports:
   --limit=<N>         Max number of reports to show (default: 20)
   --json              Emit a JSON array instead of human-readable output
+
+Error codes:
+  PCS_AUTH_WALL (77)        — landed on login page / CAPTCHA / Cloudflare challenge
+  PCS_AUTH_EXPIRED (77)     — saved session probe returned 401/302
+  PCS_SELECTOR_TIMEOUT (10) — --wait-for selector never appeared
+  PCS_NAV_FAILED (11)       — page.goto failed (DNS, net::ERR_*)
+  PCS_NETWORK (12)          — probe/network op failed transiently
+  PCS_INVALID_FLAG (2)      — unknown flag or bad enum value
+  PCS_MISSING_ARG (2)       — required positional missing
+  PCS_INVALID_INPUT (2)     — malformed URL / file / JSON
+  PCS_SESSION_NOT_FOUND (3) — no saved session by that name
+  PCS_BROWSER_CRASH (20)    — browser process died unexpectedly
+  PCS_UNKNOWN (1)           — anything unclassified
+
+  All errors emit: Error [CODE]: message
+  Auth-wall errors additionally emit: AUTH_WALL service=... session=... url=... suggest="..."
 
 Feedback loop:
   If the CLI does something unexpected, run
@@ -230,11 +331,9 @@ process.on("exit", (code) => {
   });
 });
 
-/** Emit a usage error (wrong args) and exit 1 with the error captured in the log. */
+/** Emit a usage error (wrong args) and exit with PCS_MISSING_ARG (exit 2). */
 function usageError(message: string): never {
-  loggedError = message;
-  console.error(`Error: ${message}`);
-  process.exit(1);
+  throw new PcsError("PCS_MISSING_ARG", message);
 }
 
 async function main(): Promise<void> {
@@ -254,6 +353,12 @@ async function main(): Promise<void> {
   }
 
   try {
+    // Validate flags against the per-command whitelist before dispatching
+    const knownFlags = COMMAND_FLAGS[command];
+    if (knownFlags) {
+      validateFlags(command, flags, knownFlags);
+    }
+
     switch (command) {
       case "list": {
         const probeFlag = flags["probe"];
@@ -267,10 +372,10 @@ async function main(): Promise<void> {
       case "save": {
         const name = rest[0];
         if (!name) {
-          console.error(
-            "Error: save requires a session name.\n  playwright-cli-sessions save <name>",
+          throw new PcsError(
+            "PCS_MISSING_ARG",
+            "save requires a session name.\n  playwright-cli-sessions save <name>",
           );
-          process.exit(1);
         }
         await cmdSave(name);
         break;
@@ -279,10 +384,10 @@ async function main(): Promise<void> {
       case "restore": {
         const name = rest[0];
         if (!name) {
-          console.error(
-            "Error: restore requires a session name.\n  playwright-cli-sessions restore <name> [--out=<path>]",
+          throw new PcsError(
+            "PCS_MISSING_ARG",
+            "restore requires a session name.\n  playwright-cli-sessions restore <name> [--out=<path>]",
           );
-          process.exit(1);
         }
         const outFlag = flags["out"];
         await cmdRestore(name, {
@@ -294,10 +399,10 @@ async function main(): Promise<void> {
       case "clone": {
         const [srcName, dstName] = rest;
         if (!srcName || !dstName) {
-          console.error(
-            "Error: clone requires source and destination names.\n  playwright-cli-sessions clone <source> <newName>",
+          throw new PcsError(
+            "PCS_MISSING_ARG",
+            "clone requires source and destination names.\n  playwright-cli-sessions clone <source> <newName>",
           );
-          process.exit(1);
         }
         await cmdClone(srcName, dstName, {
           overwriteSource: flags["overwrite-source"] === true,
@@ -308,10 +413,10 @@ async function main(): Promise<void> {
       case "tag": {
         const [name, service, identity] = rest;
         if (!name || !service) {
-          console.error(
-            "Error: tag requires a session name and service.\n  playwright-cli-sessions tag <name> <service> [identity]",
+          throw new PcsError(
+            "PCS_MISSING_ARG",
+            "tag requires a session name and service.\n  playwright-cli-sessions tag <name> <service> [identity]",
           );
-          process.exit(1);
         }
         cmdTag(name, service, identity);
         break;
@@ -320,10 +425,10 @@ async function main(): Promise<void> {
       case "delete": {
         const name = rest[0];
         if (!name) {
-          console.error(
-            "Error: delete requires a session name.\n  playwright-cli-sessions delete <name>",
+          throw new PcsError(
+            "PCS_MISSING_ARG",
+            "delete requires a session name.\n  playwright-cli-sessions delete <name>",
           );
-          process.exit(1);
         }
         cmdDelete(name);
         break;
@@ -332,10 +437,10 @@ async function main(): Promise<void> {
       case "probe": {
         const name = rest[0];
         if (!name) {
-          console.error(
-            "Error: probe requires a session name.\n  playwright-cli-sessions probe <name> [--service=X]",
+          throw new PcsError(
+            "PCS_MISSING_ARG",
+            "probe requires a session name.\n  playwright-cli-sessions probe <name> [--service=X]",
           );
-          process.exit(1);
         }
         const service = flags["service"];
         await cmdProbe(name, {
@@ -357,10 +462,10 @@ async function main(): Promise<void> {
       case "screenshot": {
         const url = rest[0];
         if (!url) {
-          console.error(
-            "Error: screenshot requires a URL.\n  playwright-cli-sessions screenshot <url> [--session=<name>] [--out=<path>]",
+          throw new PcsError(
+            "PCS_MISSING_ARG",
+            "screenshot requires a URL.\n  playwright-cli-sessions screenshot <url> [--session=<name>] [--out=<path>]",
           );
-          process.exit(1);
         }
         const session = flags["session"];
         const out = flags["out"];
@@ -381,10 +486,10 @@ async function main(): Promise<void> {
       case "navigate": {
         const url = rest[0];
         if (!url) {
-          console.error(
-            "Error: navigate requires a URL.\n  playwright-cli-sessions navigate <url> [--session=<name>] [--snapshot]",
+          throw new PcsError(
+            "PCS_MISSING_ARG",
+            "navigate requires a URL.\n  playwright-cli-sessions navigate <url> [--session=<name>] [--snapshot]",
           );
-          process.exit(1);
         }
         const session = flags["session"];
         const channel = flags["channel"];
@@ -403,10 +508,10 @@ async function main(): Promise<void> {
       case "snapshot": {
         const url = rest[0];
         if (!url) {
-          console.error(
-            "Error: snapshot requires a URL.\n  playwright-cli-sessions snapshot <url> [--session=<name>]",
+          throw new PcsError(
+            "PCS_MISSING_ARG",
+            "snapshot requires a URL.\n  playwright-cli-sessions snapshot <url> [--session=<name>]",
           );
-          process.exit(1);
         }
         const session = flags["session"];
         const channel = flags["channel"];
@@ -424,10 +529,10 @@ async function main(): Promise<void> {
       case "exec": {
         const scriptPath = rest[0];
         if (!scriptPath) {
-          console.error(
-            "Error: exec requires a script path.\n  playwright-cli-sessions exec <script> [<url>] [--session=<name>]",
+          throw new PcsError(
+            "PCS_MISSING_ARG",
+            "exec requires a script path.\n  playwright-cli-sessions exec <script> [<url>] [--session=<name>]",
           );
-          process.exit(1);
         }
         const url = rest[1];
         const session = flags["session"];
@@ -447,10 +552,10 @@ async function main(): Promise<void> {
       case "login": {
         const url = rest[0];
         if (!url) {
-          console.error(
-            "Error: login requires a URL.\n  playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]",
+          throw new PcsError(
+            "PCS_MISSING_ARG",
+            "login requires a URL.\n  playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]",
           );
-          process.exit(1);
         }
         const session = flags["session"];
         const channel = flags["channel"];
@@ -464,10 +569,10 @@ async function main(): Promise<void> {
       case "refresh": {
         const name = rest[0];
         if (!name) {
-          console.error(
-            "Error: refresh requires a session name.\n  playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]",
+          throw new PcsError(
+            "PCS_MISSING_ARG",
+            "refresh requires a session name.\n  playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]",
           );
-          process.exit(1);
         }
         const url = flags["url"];
         const channel = flags["channel"];
@@ -558,10 +663,33 @@ async function main(): Promise<void> {
         process.exit(1);
     }
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    loggedError = message;
-    console.error(`Error: ${message}`);
-    process.exit(1);
+    if (err instanceof PcsError) {
+      loggedError = err.message;
+      // Auth-wall gets a grep-friendly one-liner before the structured error line
+      if (err.code === "PCS_AUTH_WALL") {
+        const d = err.details;
+        const service = d["service"] ?? "unknown";
+        const sessionName = d["session"] ?? "none";
+        const url = d["finalUrl"] ?? "unknown";
+        const suggest =
+          typeof sessionName === "string" && sessionName !== "none"
+            ? `playwright-cli-sessions refresh ${sessionName}`
+            : "playwright-cli-sessions login <session>";
+        console.error(
+          `AUTH_WALL service=${service} session=${sessionName} url=${url} suggest="${suggest}"`,
+        );
+      }
+      console.error(`Error [${err.code}]: ${err.message}`);
+      if (Object.keys(err.details).length > 0) {
+        console.error(`  details: ${JSON.stringify(err.details)}`);
+      }
+      process.exit(EXIT_CODE_MAP[err.code]);
+    } else {
+      const message = err instanceof Error ? err.message : String(err);
+      loggedError = message;
+      console.error(`Error [PCS_UNKNOWN]: ${message}`);
+      process.exit(1);
+    }
   }
 }
 

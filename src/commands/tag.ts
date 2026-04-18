@@ -10,12 +10,15 @@
  */
 
 import { tagService, readSaved } from "../store.js";
+import { PcsError } from "../errors.js";
 
 export function cmdTag(name: string, service: string, identity?: string): void {
   const session = readSaved(name);
   if (!session) {
-    throw new Error(
+    throw new PcsError(
+      "PCS_SESSION_NOT_FOUND",
       `No saved session found for "${name}". Run \`playwright-cli-sessions list\` to see available sessions.`,
+      { session: name },
     );
   }
 

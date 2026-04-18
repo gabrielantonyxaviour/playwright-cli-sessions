@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveStorageState } from "../store.js";
 import type { StorageState } from "../store.js";
+import { PcsError } from "../errors.js";
 
 export async function cmdSave(name: string): Promise<void> {
   const tmp = join(tmpdir(), `pwcli-save-${name}-${Date.now()}.json`);
@@ -25,9 +26,11 @@ export async function cmdSave(name: string): Promise<void> {
     });
 
     if (!existsSync(tmp)) {
-      throw new Error(
+      throw new PcsError(
+        "PCS_UNKNOWN",
         `playwright-cli state-save did not produce a file at ${tmp}. ` +
           `Is the session "${name}" currently open?`,
+        { session: name },
       );
     }
 
