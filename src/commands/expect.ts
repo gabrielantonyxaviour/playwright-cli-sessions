@@ -34,6 +34,7 @@ import { readSaved } from "../store.js";
 import type { StorageState } from "../store.js";
 import { PcsError } from "../errors.js";
 import { checkAuthWall } from "../auth-wall.js";
+import { checkHttpError } from "../http-guard.js";
 import { checkSessionFreshness } from "../session-use.js";
 import { dirname } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
@@ -54,10 +55,13 @@ export interface ExpectOptions {
   session?: string;
   channel?: string;
   waitFor?: string;
+  waitForText?: string;
+  waitForCount?: string;
   waitUntil?: "load" | "domcontentloaded" | "networkidle" | "commit";
   headed?: boolean;
   screenshotOnFail?: string;
   noProbe?: boolean;
+  allowHttpError?: boolean;
 }
 
 /**
@@ -109,8 +113,55 @@ async function runOnce(
       }
     }
 
+    if (opts.waitForText !== undefined) {
+      const text = opts.waitForText;
+      try {
+        await page.waitForFunction(
+          (t: string) => (document.body?.innerText ?? "").includes(t),
+          text,
+          { timeout },
+        );
+      } catch {
+        return {
+          failures: [`wait-for-text: "${text}" not found within ${timeout}ms`],
+        };
+      }
+    }
+
+    if (opts.waitForCount !== undefined) {
+      const raw = opts.waitForCount;
+      const colon = raw.lastIndexOf(":");
+      if (colon === -1 || !raw.slice(0, colon)) {
+        return {
+          failures: [
+            `wait-for-count: invalid format "${raw}", expected "selector:N"`,
+          ],
+        };
+      }
+      const selector = raw.slice(0, colon);
+      const count = parseInt(raw.slice(colon + 1), 10);
+      try {
+        await page.waitForFunction(
+          ({ sel, n }: { sel: string; n: number }) =>
+            document.querySelectorAll(sel).length >= n,
+          { sel: selector, n: count },
+          { timeout },
+        );
+      } catch {
+        return {
+          failures: [
+            `wait-for-count: "${selector}" count never reached ${count} within ${timeout}ms`,
+          ],
+        };
+      }
+    }
+
     // Auth wall check — throws PcsError(PCS_AUTH_WALL) if detected, propagates up
     await checkAuthWall(page, url, { session: opts.session });
+    // HTTP-error guard — skip when user is asserting on a specific status code
+    await checkHttpError(response, url, {
+      allowHttpError: opts.allowHttpError || opts.status !== undefined,
+    });
 
     const failures: string[] = [];
 

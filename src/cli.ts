@@ -89,8 +89,12 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "channel",
     "wait-for",
     "wait-until",
+    "wait-for-text",
+    "wait-for-count",
+    "wait-for-network",
     "full-page",
     "no-probe",
+    "allow-http-error",
   ],
   navigate: [
     "session",
@@ -99,7 +103,11 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "channel",
     "wait-for",
     "wait-until",
+    "wait-for-text",
+    "wait-for-count",
+    "wait-for-network",
     "no-probe",
+    "allow-http-error",
   ],
   snapshot: [
     "session",
@@ -107,7 +115,11 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "channel",
     "wait-for",
     "wait-until",
+    "wait-for-text",
+    "wait-for-count",
+    "wait-for-network",
     "no-probe",
+    "allow-http-error",
   ],
   exec: [
     "session",
@@ -116,7 +128,11 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "channel",
     "wait-for",
     "wait-until",
+    "wait-for-text",
+    "wait-for-count",
+    "wait-for-network",
     "no-probe",
+    "eval",
   ],
   login: ["session", "channel"],
   refresh: ["url", "channel"],
@@ -131,9 +147,13 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "channel",
     "wait-for",
     "wait-until",
+    "wait-for-text",
+    "wait-for-count",
+    "wait-for-network",
     "screenshot-on-fail",
     "headed",
     "no-probe",
+    "allow-http-error",
   ],
   report: ["context", "no-notify"],
   reports: ["limit", "json"],
@@ -489,15 +509,24 @@ async function main(): Promise<void> {
         const out = flags["out"];
         const channel = flags["channel"];
         const waitFor = flags["wait-for"];
+        const waitForText = flags["wait-for-text"];
+        const waitForCount = flags["wait-for-count"];
+        let ssWaitUntil = parseWaitUntil(flags["wait-until"]);
+        if (flags["wait-for-network"] === "idle") ssWaitUntil = "networkidle";
         await cmdScreenshot(url, {
           session: typeof session === "string" ? session : undefined,
           out: typeof out === "string" ? out : undefined,
           channel: typeof channel === "string" ? channel : undefined,
           headed: flags["headed"] === true,
-          waitUntil: parseWaitUntil(flags["wait-until"]),
+          waitUntil: ssWaitUntil,
           waitFor: typeof waitFor === "string" ? waitFor : undefined,
+          waitForText:
+            typeof waitForText === "string" ? waitForText : undefined,
+          waitForCount:
+            typeof waitForCount === "string" ? waitForCount : undefined,
           fullPage: flags["full-page"] === true,
           noProbe: flags["no-probe"] === true,
+          allowHttpError: flags["allow-http-error"] === true,
         });
         break;
       }
@@ -513,14 +542,23 @@ async function main(): Promise<void> {
         const session = flags["session"];
         const channel = flags["channel"];
         const waitFor = flags["wait-for"];
+        const waitForText = flags["wait-for-text"];
+        const waitForCount = flags["wait-for-count"];
+        let navWaitUntil = parseWaitUntil(flags["wait-until"]);
+        if (flags["wait-for-network"] === "idle") navWaitUntil = "networkidle";
         await cmdNavigate(url, {
           session: typeof session === "string" ? session : undefined,
           snapshot: flags["snapshot"] === true,
           channel: typeof channel === "string" ? channel : undefined,
           headed: flags["headed"] === true,
-          waitUntil: parseWaitUntil(flags["wait-until"]),
+          waitUntil: navWaitUntil,
           waitFor: typeof waitFor === "string" ? waitFor : undefined,
+          waitForText:
+            typeof waitForText === "string" ? waitForText : undefined,
+          waitForCount:
+            typeof waitForCount === "string" ? waitForCount : undefined,
           noProbe: flags["no-probe"] === true,
+          allowHttpError: flags["allow-http-error"] === true,
         });
         break;
       }
@@ -536,37 +574,64 @@ async function main(): Promise<void> {
         const session = flags["session"];
         const channel = flags["channel"];
         const waitFor = flags["wait-for"];
+        const waitForText = flags["wait-for-text"];
+        const waitForCount = flags["wait-for-count"];
+        let snapWaitUntil = parseWaitUntil(flags["wait-until"]);
+        if (flags["wait-for-network"] === "idle") snapWaitUntil = "networkidle";
         await cmdSnapshot(url, {
           session: typeof session === "string" ? session : undefined,
           channel: typeof channel === "string" ? channel : undefined,
           headed: flags["headed"] === true,
-          waitUntil: parseWaitUntil(flags["wait-until"]),
+          waitUntil: snapWaitUntil,
           waitFor: typeof waitFor === "string" ? waitFor : undefined,
+          waitForText:
+            typeof waitForText === "string" ? waitForText : undefined,
+          waitForCount:
+            typeof waitForCount === "string" ? waitForCount : undefined,
           noProbe: flags["no-probe"] === true,
+          allowHttpError: flags["allow-http-error"] === true,
         });
         break;
       }
 
       case "exec": {
-        const scriptPath = rest[0];
-        if (!scriptPath) {
-          throw new PcsError(
-            "PCS_MISSING_ARG",
-            "exec requires a script path.\n  playwright-cli-sessions exec <script> [<url>] [--session=<name>]",
-          );
+        const evalFlag = flags["eval"];
+        const evalScript = typeof evalFlag === "string" ? evalFlag : undefined;
+        let scriptPath: string;
+        let execUrl: string | undefined;
+        if (evalScript !== undefined) {
+          scriptPath = "";
+          execUrl = rest[0];
+        } else {
+          scriptPath = rest[0] ?? "";
+          if (!scriptPath) {
+            throw new PcsError(
+              "PCS_MISSING_ARG",
+              "exec requires a script path or --eval.\n  playwright-cli-sessions exec <script> [<url>] [--session=<name>]\n  playwright-cli-sessions exec --eval='<js>' [<url>] [--session=<name>]",
+            );
+          }
+          execUrl = rest[1];
         }
-        const url = rest[1];
         const session = flags["session"];
         const channel = flags["channel"];
         const waitFor = flags["wait-for"];
+        const waitForText = flags["wait-for-text"];
+        const waitForCount = flags["wait-for-count"];
+        let execWaitUntil = parseWaitUntil(flags["wait-until"]);
+        if (flags["wait-for-network"] === "idle") execWaitUntil = "networkidle";
         await cmdExec(scriptPath, {
           session: typeof session === "string" ? session : undefined,
-          url: url ?? undefined,
+          url: execUrl,
           channel: typeof channel === "string" ? channel : undefined,
           headed: flags["headed"] === true,
-          waitUntil: parseWaitUntil(flags["wait-until"]),
+          waitUntil: execWaitUntil,
           waitFor: typeof waitFor === "string" ? waitFor : undefined,
+          waitForText:
+            typeof waitForText === "string" ? waitForText : undefined,
+          waitForCount:
+            typeof waitForCount === "string" ? waitForCount : undefined,
           noProbe: flags["no-probe"] === true,
+          evalScript,
         });
         break;
       }
@@ -648,8 +713,15 @@ async function main(): Promise<void> {
         const sessionFlag = flags["session"];
         const channelFlag = flags["channel"];
         const waitForFlag = flags["wait-for"];
+        const waitForTextFlag = flags["wait-for-text"];
+        const waitForCountFlag = flags["wait-for-count"];
         const waitUntilFlag = flags["wait-until"];
         const screenshotOnFailFlag = flags["screenshot-on-fail"];
+        let expWaitUntil =
+          typeof waitUntilFlag === "string"
+            ? parseWaitUntil(waitUntilFlag)
+            : undefined;
+        if (flags["wait-for-network"] === "idle") expWaitUntil = "networkidle";
         await cmdExpect(url, {
           ...(typeof titleFlag === "string" ? { title: titleFlag } : {}),
           ...(typeof selectorFlag === "string"
@@ -668,14 +740,19 @@ async function main(): Promise<void> {
           ...(typeof sessionFlag === "string" ? { session: sessionFlag } : {}),
           ...(typeof channelFlag === "string" ? { channel: channelFlag } : {}),
           ...(typeof waitForFlag === "string" ? { waitFor: waitForFlag } : {}),
-          ...(typeof waitUntilFlag === "string"
-            ? { waitUntil: parseWaitUntil(waitUntilFlag) }
+          ...(typeof waitForTextFlag === "string"
+            ? { waitForText: waitForTextFlag }
             : {}),
+          ...(typeof waitForCountFlag === "string"
+            ? { waitForCount: waitForCountFlag }
+            : {}),
+          ...(expWaitUntil !== undefined ? { waitUntil: expWaitUntil } : {}),
           ...(typeof screenshotOnFailFlag === "string"
             ? { screenshotOnFail: screenshotOnFailFlag }
             : {}),
           headed: flags["headed"] === true,
           noProbe: flags["no-probe"] === true,
+          allowHttpError: flags["allow-http-error"] === true,
         });
         break;
       }

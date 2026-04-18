@@ -20,6 +20,8 @@ import { readSaved } from "../store.js";
 import type { StorageState } from "../store.js";
 import { PcsError } from "../errors.js";
 import { checkAuthWall } from "../auth-wall.js";
+import { checkHttpError } from "../http-guard.js";
+import { applyWaits } from "../wait-orchestrator.js";
 import { checkSessionFreshness } from "../session-use.js";
 
 // Our StorageState has `sameSite: string` but Playwright expects the union type.
@@ -37,8 +39,11 @@ export interface ScreenshotOptions {
   headed?: boolean;
   waitUntil?: "load" | "domcontentloaded" | "networkidle" | "commit";
   waitFor?: string;
+  waitForText?: string;
+  waitForCount?: string;
   fullPage?: boolean;
   noProbe?: boolean;
+  allowHttpError?: boolean;
 }
 
 export async function cmdScreenshot(
@@ -80,8 +85,9 @@ export async function cmdScreenshot(
     );
     try {
       const page = await context.newPage();
+      let response: import("playwright").Response | null = null;
       try {
-        await page.goto(url, {
+        response = await page.goto(url, {
           waitUntil: opts.waitUntil ?? "domcontentloaded",
           timeout: 30000,
         });
@@ -92,18 +98,11 @@ export async function cmdScreenshot(
           { url },
         );
       }
-      if (opts.waitFor) {
-        try {
-          await page.waitForSelector(opts.waitFor, { timeout: 30000 });
-        } catch (selErr) {
-          throw new PcsError(
-            "PCS_SELECTOR_TIMEOUT",
-            (selErr as Error).message.split("\n")[0],
-            { selector: opts.waitFor },
-          );
-        }
-      }
       await checkAuthWall(page, url, { session: opts.session });
+      await checkHttpError(response, url, {
+        allowHttpError: opts.allowHttpError,
+      });
+      await applyWaits(page, opts);
       await page.screenshot({
         path: outPath,
         fullPage: opts.fullPage === true,
