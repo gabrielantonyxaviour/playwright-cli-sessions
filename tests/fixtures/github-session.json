@@ -1,0 +1,21 @@
+{
+  "name": "github-session",
+  "storageState": {
+    "cookies": [
+      {
+        "name": "user_session",
+        "value": "fixture-not-a-real-token",
+        "domain": ".github.com",
+        "path": "/",
+        "expires": 4102444800,
+        "httpOnly": true,
+        "secure": true,
+        "sameSite": "Lax"
+      }
+    ],
+    "origins": []
+  },
+  "lastUrl": "https://github.com/",
+  "savedAt": "2026-04-17T00:00:00.000Z",
+  "savedBy": "fixture"
+}

@@ -24,7 +24,15 @@ import {
 } from "./service-detector.js";
 import { checkExpiry, type ServiceExpiry } from "./session-expiry.js";
 
-export const SESSION_STORE_ROOT = join(homedir(), ".playwright-sessions");
+// Honor PLAYWRIGHT_SESSIONS_DIR so tests (and power-users) can sandbox the
+// session store outside of ~/.playwright-sessions. Read once at module load —
+// Playwright commands are short-lived, so env mutation mid-process is not a
+// concern.
+export const SESSION_STORE_ROOT =
+  process.env.PLAYWRIGHT_SESSIONS_DIR &&
+  process.env.PLAYWRIGHT_SESSIONS_DIR.length > 0
+    ? process.env.PLAYWRIGHT_SESSIONS_DIR
+    : join(homedir(), ".playwright-sessions");
 export const PROBE_CACHE_FILE = join(SESSION_STORE_ROOT, ".probe-cache.json");
 export const HEALTH_LOG_FILE = join(SESSION_STORE_ROOT, ".health.json");
 
