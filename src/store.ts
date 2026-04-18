@@ -121,9 +121,21 @@ export function readSaved(name: string): SavedSession | null {
   }
 }
 
-export function writeSaved(session: SavedSession): void {
+/**
+ * Write a session under the given filename (the canonical ID — what
+ * `readSaved(name)` and `deleteSaved(name)` key on). The `name` argument is
+ * intentionally explicit: callers that read by `name` and mutate must write
+ * back under the *same* `name` even if the embedded `session.name` differs
+ * (e.g. a session file renamed on disk, or a cloned-then-tagged session).
+ *
+ * The embedded `.name` is normalized to match the filename so the invariant
+ * "filename stem === session.name" holds after every write.
+ */
+export function writeSaved(name: string, session: SavedSession): void {
   ensureRoot();
-  writeFileSync(filePath(session.name), JSON.stringify(session, null, 2));
+  const normalized: SavedSession =
+    session.name === name ? session : { ...session, name };
+  writeFileSync(filePath(name), JSON.stringify(normalized, null, 2));
 }
 
 export function deleteSaved(name: string): boolean {
@@ -161,7 +173,7 @@ export function tagService(
     });
   }
   session.auth = auth;
-  writeSaved(session);
+  writeSaved(name, session);
 }
 
 /**
@@ -194,7 +206,7 @@ export function saveStorageState(
     ...(auth.length > 0 ? { auth } : {}),
     ...(existing?.cloneOf ? { cloneOf: existing.cloneOf } : {}),
   };
-  writeSaved(session);
+  writeSaved(name, session);
   return session;
 }
 
@@ -213,7 +225,7 @@ export function cloneSession(srcName: string, dstName: string): SavedSession {
     savedAt: new Date().toISOString(),
     savedBy: SESSION_ID,
   };
-  writeSaved(dst);
+  writeSaved(dstName, dst);
   return dst;
 }
 

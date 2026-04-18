@@ -10,12 +10,15 @@
 # it requires a live playwright-cli session, which the scenario harness
 # does not (and should not) stand up.
 #
-# Quirk discovered: `writeSaved(session)` uses `session.name` to derive
-# the filename, whereas `readSaved(name)` uses the caller-supplied name
-# to locate the file. `pcs_fixture <src> <dst>` copies bytes only — the
-# internal `.name` field still matches the fixture's original stem.
-# When a scenario needs read-and-write (tag), we must ensure the
-# internal .name matches the filename. We do that with `mk_session`.
+# History: `writeSaved` originally keyed off `session.name` while
+# `readSaved(name)` keyed off the caller-supplied name — so a file on disk
+# whose internal `.name` disagreed with its filename stem (e.g. after a
+# manual `mv`) would silently get tagged into a DIFFERENT file. Fixed in
+# 0.2.6: `writeSaved(name, session)` now takes the filename explicitly and
+# normalizes `session.name` to match.
+# The `mk_session` helper is kept for convenience — it mints a session
+# where the internal .name already matches, which keeps most cases simple.
+# Case 8b below is the regression guard that keeps the fix honest.
 set -euo pipefail
 source "${PCS_SCENARIO_LIB}/setup.sh"
 
@@ -126,6 +129,34 @@ rc=0
 tag_err="$(PCS tag only-name-no-service 2>&1)" || rc=$?
 assert_exit_code "1" "$rc" "tag missing service exits non-zero"
 assert_contains "$tag_err" "Error: tag requires" "tag missing service error message"
+
+# 8b. Regression: tag writes back to the FILENAME even if the embedded
+# `.name` field disagrees (e.g. after a manual rename on disk). Before the
+# writeSaved(name, session) fix, tag would silently write to a DIFFERENT
+# file matching session.name, leaving the target file unchanged.
+pcs_fixture empty-session mismatched
+# pcs_fixture copies the fixture bytes, so mismatched.json has
+# embedded .name === "empty-session" but the filename stem is "mismatched".
+embedded_before="$(json_get "$PLAYWRIGHT_SESSIONS_DIR/mismatched.json" 'data.name')"
+assert_eq "empty-session" "$embedded_before" "precondition: embedded name differs from filename"
+
+PCS tag mismatched RegressionCheck alice2 >/dev/null
+# The tag must land in mismatched.json — not in empty-session.json.
+assert_file_exists "$PLAYWRIGHT_SESSIONS_DIR/mismatched.json" "tag preserves target file"
+assert_eq "RegressionCheck" \
+  "$(json_get "$PLAYWRIGHT_SESSIONS_DIR/mismatched.json" 'data.auth[0].service')" \
+  "tag wrote to the filename-keyed file, not the embedded-name file"
+# And the embedded `.name` should now be normalized to match the filename.
+assert_eq "mismatched" \
+  "$(json_get "$PLAYWRIGHT_SESSIONS_DIR/mismatched.json" 'data.name')" \
+  "writeSaved normalized .name to match the filename"
+# The "empty-session" file must NOT exist — the fixture was copied AS
+# mismatched, not under its original name.
+[[ ! -f "$PLAYWRIGHT_SESSIONS_DIR/empty-session.json" ]] || {
+  echo "regression: tag leaked a write into empty-session.json" >&2
+  exit 1
+}
+_assert_ok "tag did not leak a stray empty-session.json"
 
 # ── delete ────────────────────────────────────────────────────────────
 
