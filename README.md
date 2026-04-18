@@ -95,6 +95,34 @@ playwright-cli-sessions install --skills
 # → .claude/skills/playwright-cli-sessions/SKILL.md + references/
 ```
 
+## Stealth (v0.3.2+)
+
+Browser automation commands automatically apply a fingerprint patch that removes
+the `HeadlessChrome` token from the User-Agent string. Despite `--channel=chrome`
+launching real Chrome, Playwright's `--headless=new` mode still emits
+`HeadlessChrome/<ver>` in the HTTP `User-Agent` header — a signal that CDN-level
+bot filters (Cloudflare, Akamai, DataDome) check before any JavaScript runs.
+
+**What gets patched automatically:**
+
+- **User-Agent** — rewrites `HeadlessChrome/<ver>` → `Chrome/<ver>` in both the
+  HTTP header and `navigator.userAgent`, using the real version from the launched
+  browser binary.
+- **`navigator.connection.rtt`** — spoofed to a realistic 50–99ms value (headless
+  reports 0, which is a known JS-level detection signal).
+- **`devicePixelRatio`** — set to 2 on macOS (Retina) and 1 elsewhere, with a
+  matching viewport (1440×900 on macOS, 1920×1080 on Linux/Windows).
+
+The patch was validated by a real Tinder signup field test on 2026-04-18 which
+confirmed `HeadlessChrome/147.0.0.0` in the UA despite `--channel=chrome`.
+
+**Opt-outs:**
+
+| Env var | Effect |
+|---------|--------|
+| `PLAYWRIGHT_CLI_NO_STEALTH_PATCH=1` | Skip UA rewrite, RTT spoof, and DPR patch. Keeps `--channel=chrome` launch args. Useful for testing your own site's bot-detection pipeline against a raw headless UA. |
+| `PLAYWRIGHT_CLI_BUNDLED=1` | Use the bundled Chrome for Testing (no `--channel=chrome`, no stealth args). For CI servers without real Chrome installed. |
+
 ## Browser automation (v0.2.0+)
 
 These commands launch a headless Chrome browser directly — no running

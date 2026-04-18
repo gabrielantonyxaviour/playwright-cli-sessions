@@ -20,7 +20,10 @@
 
 import type { BrowserContextOptions } from "playwright";
 import * as readline from "node:readline";
-import { launchStealthChrome, STEALTH_INIT_SCRIPT } from "../browser-launch.js";
+import {
+  launchStealthChrome,
+  createStealthContext,
+} from "../browser-launch.js";
 import { readSaved, saveStorageState } from "../store.js";
 import type { StorageState } from "../store.js";
 
@@ -59,10 +62,9 @@ export async function cmdRefresh(
     channel: opts.channel,
   });
   try {
-    const context = await browser.newContext({
+    const context = await createStealthContext(browser, {
       storageState: asPlaywrightSS(existing.storageState),
     });
-    await context.addInitScript(STEALTH_INIT_SCRIPT);
     const page = await context.newPage();
     await page.goto(url);
 

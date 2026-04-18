@@ -12,7 +12,10 @@ import type { BrowserContextOptions } from "playwright";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { launchStealthChrome, STEALTH_INIT_SCRIPT } from "../browser-launch.js";
+import {
+  launchStealthChrome,
+  createStealthContext,
+} from "../browser-launch.js";
 import { readSaved } from "../store.js";
 import type { StorageState } from "../store.js";
 
@@ -61,10 +64,10 @@ export async function cmdScreenshot(
     channel: opts.channel,
   });
   try {
-    const context = await browser.newContext(
+    const context = await createStealthContext(
+      browser,
       storageState ? { storageState: asPlaywrightSS(storageState) } : {},
     );
-    await context.addInitScript(STEALTH_INIT_SCRIPT);
     try {
       const page = await context.newPage();
       await page.goto(url, {

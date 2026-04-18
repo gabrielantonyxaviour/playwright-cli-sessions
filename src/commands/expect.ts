@@ -27,7 +27,10 @@
  */
 
 import type { BrowserContextOptions, Response } from "playwright";
-import { launchStealthChrome, STEALTH_INIT_SCRIPT } from "../browser-launch.js";
+import {
+  launchStealthChrome,
+  createStealthContext,
+} from "../browser-launch.js";
 import { readSaved } from "../store.js";
 import type { StorageState } from "../store.js";
 import { dirname } from "node:path";
@@ -69,10 +72,10 @@ async function runOnce(
     channel: opts.channel,
   });
   try {
-    const context = await browser.newContext(
+    const context = await createStealthContext(
+      browser,
       storageState ? { storageState: asPlaywrightSS(storageState) } : {},
     );
-    await context.addInitScript(STEALTH_INIT_SCRIPT);
     const page = await context.newPage();
 
     let response: Response | null;

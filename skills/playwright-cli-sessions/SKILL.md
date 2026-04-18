@@ -131,6 +131,17 @@ After this, the session is usable via Workflow B.
 the user to re-run `login` or `refresh`. Do NOT try to automate password entry,
 2FA, CAPTCHA, WebAuthn, or OAuth popups — these always fail.
 
+## Stealth (v0.3.2+)
+
+Browser automation commands automatically patch the fingerprint to remove
+`HeadlessChrome` from the User-Agent, spoof `navigator.connection.rtt` to a
+realistic non-zero value, and set `devicePixelRatio` to match the host OS (2 on
+macOS, 1 elsewhere). Validated against a real Tinder signup test on 2026-04-18.
+
+**Opt-outs (env vars):**
+- `PLAYWRIGHT_CLI_NO_STEALTH_PATCH=1` — skip UA/RTT/DPR patches; keep `--channel=chrome`
+- `PLAYWRIGHT_CLI_BUNDLED=1` — skip all stealth; use bundled Chrome for Testing
+
 ## Browser automation commands
 
 All browser commands accept: `--session=<name>`, `--headed`, `--channel=<chrome|msedge|...>`, `--wait-for=<selector>`, `--wait-until=<load|domcontentloaded|networkidle|commit>`.
