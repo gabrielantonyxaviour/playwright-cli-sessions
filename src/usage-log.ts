@@ -22,6 +22,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SESSION_STORE_ROOT } from "./store.js";
+import { detectInvocationSource, type InvocationSource } from "./invocation.js";
 
 export const USAGE_LOG_FILE = join(SESSION_STORE_ROOT, ".usage-log.jsonl");
 
@@ -44,10 +45,16 @@ export interface UsageLogEntry {
   sessionId: string;
   /** Node version + platform for environment-dependent bugs */
   env: { node: string; platform: string };
+  /**
+   * Who ran this command — detected via CLAUDECODE=1 env var.
+   * "claude-code" when the CLI was invoked by an agent session; "user"
+   * when the caller was a human at the terminal.
+   */
+  invokedBy: InvocationSource;
 }
 
 export function logUsage(
-  entry: Omit<UsageLogEntry, "ts" | "sessionId" | "env" | "cwd">,
+  entry: Omit<UsageLogEntry, "ts" | "sessionId" | "env" | "cwd" | "invokedBy">,
 ): void {
   try {
     if (!existsSync(SESSION_STORE_ROOT)) {
@@ -59,6 +66,7 @@ export function logUsage(
       cwd: process.cwd(),
       sessionId: `${process.pid}-${Date.now().toString(36)}`,
       env: { node: process.version, platform: process.platform },
+      invokedBy: detectInvocationSource(),
     };
     appendFileSync(USAGE_LOG_FILE, JSON.stringify(full) + "\n", "utf-8");
   } catch {

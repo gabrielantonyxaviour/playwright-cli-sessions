@@ -40,8 +40,19 @@ your last ~10 CLI invocations (from `.usage-log.jsonl`) auto-embedded for
 context. The user reviews them and fixes the gap. You never have to work
 around the same bug twice.
 
+**Proactive notification (v0.3.1+):** when a Claude Code session files a
+report (detected via `CLAUDECODE=1`), the CLI fires a non-blocking macOS
+desktop notification so the human sees it immediately — they don't have to
+be watching the terminal. This is the point: file the report, the user finds
+out right away, the gap closes on the next release.
+
+- Opt-out per-call: `playwright-cli-sessions report "..." --no-notify`
+- Opt-out per-environment: `PLAYWRIGHT_CLI_SESSIONS_NO_NOTIFY=1`
+- No-op on non-darwin platforms.
+- Human-filed reports don't notify (you already know you filed one).
+
 ```bash
-# List recent reports
+# List recent reports — Claude-filed ones are marked [CC]
 playwright-cli-sessions reports
 playwright-cli-sessions reports --json --limit=5
 ```

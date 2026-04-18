@@ -28,7 +28,7 @@ playwright-cli-sessions exec <script> [<url>] [--session=<name>] [--headed] [--c
 playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]
 playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]
 playwright-cli-sessions expect <url> [--title=<substr>] [--selector=<sel>] [--text=<substr>] [--status=<code>] [--session=<name>] [--timeout=<ms>] [--retry=<N>] [--screenshot-on-fail=<path>]
-playwright-cli-sessions report "<message>" [--context=<N>]
+playwright-cli-sessions report "<message>" [--context=<N>] [--no-notify]
 playwright-cli-sessions reports [--limit=<N>] [--json]
 ```
 
@@ -279,13 +279,28 @@ playwright-cli-sessions report "screenshot of gmail.com with session gabriel-pla
 
 Every report is a markdown file under `~/.playwright-sessions/.reports/`
 stamped with the last ~10 CLI invocations (pulled from the append-only log at
-`~/.playwright-sessions/.usage-log.jsonl`) so the context is never lost.
+`~/.playwright-sessions/.usage-log.jsonl`) so the context is never lost. Each
+report also records whether it was filed by a human (`user`) or by an AI
+agent (`claude-code`) — detected via the `CLAUDECODE=1` env var that Claude
+Code sets in every shell it spawns.
+
+**Proactive desktop notification (v0.3.1+).** When a Claude Code session
+files a report, the CLI fires a non-blocking macOS notification so the
+human finds out the moment it happens — no need to watch the terminal. The
+`reports` listing prefixes Claude-filed entries with `[CC]` so they're
+easy to triage.
+
+- Per-call opt-out: `playwright-cli-sessions report "..." --no-notify`
+- Per-environment opt-out: `PLAYWRIGHT_CLI_SESSIONS_NO_NOTIFY=1`
+- No-op on non-darwin platforms.
+- Human-filed reports never trigger a notification.
 
 ```bash
-playwright-cli-sessions reports                    # list recent reports
+playwright-cli-sessions reports                    # list recent reports, [CC] marker on Claude-filed
 playwright-cli-sessions reports --limit=5
-playwright-cli-sessions reports --json
+playwright-cli-sessions reports --json             # machine-readable, includes invokedBy
 playwright-cli-sessions report "msg" --context=20  # more log context
+playwright-cli-sessions report "msg" --no-notify   # skip the macOS notification
 ```
 
 Every invocation of the CLI — success or failure — is appended to

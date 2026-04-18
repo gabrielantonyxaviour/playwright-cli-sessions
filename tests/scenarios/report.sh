@@ -17,8 +17,17 @@
 #   9. `reports --limit=N` → caps output to N entries
 #  10. Usage log JSONL shape — one line per invocation, parseable, carries cmd/args/exitCode
 #  11. Arg value with spaces survives round-trip through the log (no split)
+#  12. invokedBy="user" stamped in log + report when CLAUDECODE is unset
+#  13. invokedBy="claude-code" stamped when CLAUDECODE=1, [CC] marker in listing
+#  14. --no-notify flag is accepted and does not crash the report
 set -euo pipefail
 source "${PCS_SCENARIO_LIB}/setup.sh"
+
+# The harness itself may be invoked by a Claude Code session, which leaks
+# CLAUDECODE=1 into every child PCS invocation and would fire a macOS
+# notification on every `report` case. Suppress that here — we test the
+# detection logic explicitly below by toggling CLAUDECODE per invocation.
+export PLAYWRIGHT_CLI_SESSIONS_NO_NOTIFY=1
 
 REPORTS_DIR="$PLAYWRIGHT_SESSIONS_DIR/.reports"
 LOG_FILE="$PLAYWRIGHT_SESSIONS_DIR/.usage-log.jsonl"
@@ -86,6 +95,7 @@ assert_json_has "$json_list" ".[0].path" "json entry has .path"
 assert_json_has "$json_list" ".[0].fileName" "json entry has .fileName"
 assert_json_has "$json_list" ".[0].filedAt" "json entry has .filedAt"
 assert_json_has "$json_list" ".[0].title" "json entry has .title"
+assert_json_has "$json_list" ".[0].invokedBy" "json entry has .invokedBy"
 
 # ── 7. Empty message → usage error ────────────────────────────────────
 rc=0
@@ -133,7 +143,7 @@ node -e "
   const lines = require('fs').readFileSync(process.argv[1],'utf8').split('\n').filter(Boolean);
   for (const line of lines) {
     const entry = JSON.parse(line);
-    for (const k of ['ts','cmd','args','exitCode','durationMs','cwd','sessionId','env']) {
+    for (const k of ['ts','cmd','args','exitCode','durationMs','cwd','sessionId','env','invokedBy']) {
       if (!(k in entry)) {
         console.error('missing key', k, 'in', line);
         process.exit(1);
@@ -174,3 +184,54 @@ last_args1="$(node -e "
   process.stdout.write(last.args[1] ?? '');
 " "$LOG_FILE")"
 assert_eq "$spacey" "$last_args1" "spaces preserved in logged arg value"
+
+# ── 12. invokedBy="user" when CLAUDECODE is unset ─────────────────────
+# Run PCS with CLAUDECODE removed from the environment — the usage log
+# entry and the report markdown should both record invokedBy="user".
+env -u CLAUDECODE node "$CLI_JS" report "run as user" >/dev/null 2>&1
+
+last_invoked_user="$(node -e "
+  const lines = require('fs').readFileSync(process.argv[1],'utf8').split('\n').filter(Boolean);
+  const last = JSON.parse(lines[lines.length - 1]);
+  process.stdout.write(last.invokedBy ?? '');
+" "$LOG_FILE")"
+assert_eq "user" "$last_invoked_user" "usage log stamps invokedBy=user when CLAUDECODE unset"
+
+# Find the newest report and confirm the Invoked by: line.
+shopt -s nullglob
+md_files_user=( "$REPORTS_DIR"/*.md )
+shopt -u nullglob
+IFS=$'\n' sorted_user=($(printf '%s\n' "${md_files_user[@]}" | sort))
+unset IFS
+newest_user="${sorted_user[-1]}"
+assert_contains "$(cat "$newest_user")" "**Invoked by:** user" "user-filed report stamps invokedBy=user"
+
+# ── 13. invokedBy="claude-code" when CLAUDECODE=1 ─────────────────────
+CLAUDECODE=1 node "$CLI_JS" report "filed by cc agent" >/dev/null 2>&1
+
+last_invoked_cc="$(node -e "
+  const lines = require('fs').readFileSync(process.argv[1],'utf8').split('\n').filter(Boolean);
+  const last = JSON.parse(lines[lines.length - 1]);
+  process.stdout.write(last.invokedBy ?? '');
+" "$LOG_FILE")"
+assert_eq "claude-code" "$last_invoked_cc" "usage log stamps invokedBy=claude-code when CLAUDECODE=1"
+
+shopt -s nullglob
+md_files_cc=( "$REPORTS_DIR"/*.md )
+shopt -u nullglob
+IFS=$'\n' sorted_cc=($(printf '%s\n' "${md_files_cc[@]}" | sort))
+unset IFS
+newest_cc="${sorted_cc[-1]}"
+assert_contains "$(cat "$newest_cc")" "**Invoked by:** claude-code" "cc-filed report stamps invokedBy=claude-code"
+
+# Reports list shows [CC] marker for that entry.
+cc_list="$(PCS reports 2>&1)"
+assert_contains "$cc_list" "[CC]" "reports list shows [CC] marker for claude-code reports"
+assert_contains "$cc_list" "filed by cc agent" "reports list shows cc-filed title"
+
+# ── 14. --no-notify flag is accepted and does not crash ───────────────
+# A report with --no-notify must succeed whether or not CLAUDECODE is set.
+rc_nn=0
+out_nn="$(CLAUDECODE=1 node "$CLI_JS" report "no-notify flag test" --no-notify 2>&1)" || rc_nn=$?
+assert_exit_code 0 "$rc_nn" "--no-notify report exits 0"
+assert_contains "$out_nn" "Report saved to" "--no-notify report still writes the file"

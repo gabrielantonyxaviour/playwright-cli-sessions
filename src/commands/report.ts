@@ -31,6 +31,8 @@ import {
 import { join } from "node:path";
 import { SESSION_STORE_ROOT } from "../store.js";
 import { readRecentUsage } from "../usage-log.js";
+import { detectInvocationSource } from "../invocation.js";
+import { fireNotification } from "../notify.js";
 
 export const REPORTS_DIR = join(SESSION_STORE_ROOT, ".reports");
 
@@ -51,6 +53,12 @@ function tsFileStamp(): string {
 export interface ReportOptions {
   /** Number of recent usage-log entries to embed as context (default 10) */
   context?: number;
+  /**
+   * Whether to fire a desktop notification when the caller is Claude Code.
+   * Defaults to true. A false opt-out is useful for tests and CI runs where
+   * a macOS NotificationCenter popup would be noise, not signal.
+   */
+  notify?: boolean;
 }
 
 /** Write a new report file. Returns the absolute path. */
@@ -69,11 +77,13 @@ export function cmdReport(message: string, opts: ReportOptions = {}): string {
   const fileName = `${tsFileStamp()}-${slugify(firstLine)}.md`;
   const path = join(REPORTS_DIR, fileName);
   const recent = readRecentUsage(opts.context ?? 10);
+  const invokedBy = detectInvocationSource();
 
   const lines: string[] = [];
   lines.push(`# Report: ${firstLine}`);
   lines.push("");
   lines.push(`**Filed:** ${new Date().toISOString()}`);
+  lines.push(`**Invoked by:** ${invokedBy}`);
   lines.push(`**CWD:** ${process.cwd()}`);
   lines.push("");
   lines.push("## Message");
@@ -102,6 +112,22 @@ export function cmdReport(message: string, opts: ReportOptions = {}): string {
 
   writeFileSync(path, lines.join("\n") + "\n", "utf-8");
   console.log(`✓ Report saved to ${path}`);
+
+  // When a Claude Code session files a report, the human user is rarely
+  // watching the terminal — they're on another desktop, reviewing a PR, or
+  // asleep. A desktop notification is how we pierce "out of sight, out of
+  // mind" so CLI gaps surface the moment they happen instead of accumulating
+  // silently in .reports/. Human-filed reports don't notify (the human
+  // already knows they filed it).
+  const shouldNotify = opts.notify !== false && invokedBy === "claude-code";
+  if (shouldNotify) {
+    fireNotification({
+      title: "playwright-cli-sessions: Claude filed a report",
+      subtitle: firstLine.slice(0, 100),
+      message: `Saved to ${path}. Run \`npx playwright-cli-sessions reports\` to view.`,
+    });
+  }
+
   return path;
 }
 
@@ -115,19 +141,31 @@ interface ReportSummary {
   fileName: string;
   filedAt: string;
   title: string;
+  invokedBy: "claude-code" | "user" | "unknown";
 }
 
 function readReportSummary(path: string): ReportSummary | null {
   try {
     const stat = statSync(path);
     const text = readFileSync(path, "utf-8");
-    const firstLine = text.split("\n").find((l) => l.startsWith("# ")) ?? "";
+    const lines = text.split("\n");
+    const firstLine = lines.find((l) => l.startsWith("# ")) ?? "";
     const title = firstLine.replace(/^#\s*Report:\s*/, "").replace(/^#\s*/, "");
+    // Parse "**Invoked by:** claude-code" from the header. Older reports
+    // (pre-0.3.1) lack this field — mark them "unknown" so they're visible
+    // but not misattributed.
+    const invokedLine = lines.find((l) => l.startsWith("**Invoked by:**"));
+    let invokedBy: ReportSummary["invokedBy"] = "unknown";
+    if (invokedLine) {
+      const value = invokedLine.replace(/^\*\*Invoked by:\*\*\s*/, "").trim();
+      if (value === "claude-code" || value === "user") invokedBy = value;
+    }
     return {
       path,
       fileName: path.split("/").pop() ?? path,
       filedAt: stat.mtime.toISOString(),
       title: title.trim() || "(untitled)",
+      invokedBy,
     };
   } catch {
     return null;
@@ -175,7 +213,8 @@ export function cmdReports(opts: ReportsListOptions = {}): void {
   console.log();
   for (const s of top) {
     const date = s.filedAt.slice(0, 16).replace("T", " ");
-    console.log(`  [${date}] ${s.title}`);
+    const marker = s.invokedBy === "claude-code" ? " [CC]" : "";
+    console.log(`  [${date}]${marker} ${s.title}`);
     console.log(`    ${s.path}`);
   }
 }

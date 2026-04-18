@@ -23,7 +23,7 @@
  *   playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]
  *   playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]
  *   playwright-cli-sessions expect <url> [--title=<substr>] [--selector=<sel>] [--text=<substr>] [--status=<code>] [--session=<name>] [--timeout=<ms>] [--retry=<N>] [--screenshot-on-fail=<path>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
- *   playwright-cli-sessions report "<message>" [--context=<N>]
+ *   playwright-cli-sessions report "<message>" [--context=<N>] [--no-notify]
  *   playwright-cli-sessions reports [--limit=<N>] [--json]
  */
 
@@ -110,7 +110,7 @@ Usage:
   playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]
   playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]
   playwright-cli-sessions expect <url> [--title=<substr>] [--selector=<sel>] [--text=<substr>] [--status=<code>] [--session=<name>] [--timeout=<ms>] [--retry=<N>] [--screenshot-on-fail=<path>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
-  playwright-cli-sessions report "<message>" [--context=<N>]
+  playwright-cli-sessions report "<message>" [--context=<N>] [--no-notify]
   playwright-cli-sessions reports [--limit=<N>] [--json]
 
 Commands:
@@ -190,6 +190,8 @@ Options for expect:
 
 Options for report:
   --context=<N>       Number of recent usage-log entries to embed (default: 10)
+  --no-notify         Skip the macOS desktop notification when a Claude Code
+                      session files a report (env: PLAYWRIGHT_CLI_SESSIONS_NO_NOTIFY=1)
 
 Options for reports:
   --limit=<N>         Max number of reports to show (default: 20)
@@ -488,7 +490,8 @@ async function main(): Promise<void> {
           typeof contextFlag === "string"
             ? parseInt(contextFlag, 10)
             : undefined;
-        cmdReport(message, { context });
+        const noNotify = flags["no-notify"] === true;
+        cmdReport(message, { context, notify: !noNotify });
         break;
       }
 
