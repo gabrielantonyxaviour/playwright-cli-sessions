@@ -73,7 +73,11 @@ for scenario in "${SCENARIO_FILES[@]}"; do
 
   printf "▶ %s ... " "$name"
 
-  log="$(mktemp "${TMPDIR:-/tmp}/pcs-log-${name}-XXXXXX.txt")"
+  # Use mktemp without a suffix — BSD mktemp (macOS default) requires XXXXXX
+  # to be the final component. Add the .txt manually after.
+  log_base="$(mktemp "${TMPDIR:-/tmp}/pcs-log-${name}-XXXXXX")"
+  log="${log_base}.txt"
+  mv "$log_base" "$log"
   if (cd "$REPO_ROOT" && bash "$scenario") >"$log" 2>&1; then
     printf "\033[32mPASS\033[0m\n"
     PASSED=$((PASSED + 1))
