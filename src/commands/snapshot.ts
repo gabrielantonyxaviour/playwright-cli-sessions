@@ -23,6 +23,10 @@ const asPlaywrightSS = (ss: StorageState): PlaywrightStorageState =>
 
 export interface SnapshotOptions {
   session?: string;
+  channel?: string;
+  headed?: boolean;
+  waitUntil?: "load" | "domcontentloaded" | "networkidle" | "commit";
+  waitFor?: string;
 }
 
 export async function cmdSnapshot(
@@ -40,7 +44,10 @@ export async function cmdSnapshot(
     storageState = saved.storageState;
   }
 
-  const browser = await launchStealthChrome({ headless: true });
+  const browser = await launchStealthChrome({
+    headless: !opts.headed,
+    channel: opts.channel,
+  });
   try {
     const context = await browser.newContext(
       storageState ? { storageState: asPlaywrightSS(storageState) } : {},
@@ -48,7 +55,13 @@ export async function cmdSnapshot(
     await context.addInitScript(STEALTH_INIT_SCRIPT);
     try {
       const page = await context.newPage();
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.goto(url, {
+        waitUntil: opts.waitUntil ?? "domcontentloaded",
+        timeout: 30000,
+      });
+      if (opts.waitFor) {
+        await page.waitForSelector(opts.waitFor, { timeout: 30000 });
+      }
       const aria = await page.locator("html").ariaSnapshot();
       console.log(aria);
     } finally {

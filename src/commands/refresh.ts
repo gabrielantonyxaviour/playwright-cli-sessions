@@ -1,19 +1,21 @@
 /**
- * login <url> [--session=<name>] [--channel=<channel>]
+ * refresh <name> [--url=<url>] [--channel=<channel>]
  *
- * Open a non-headless browser, let the user log in interactively, then save
- * the authenticated session to ~/.playwright-sessions/<name>.json.
+ * Re-open an existing saved session in a browser so the user can
+ * re-authenticate (e.g. after a session expires). Cookies from the existing
+ * session are pre-loaded, the user does whatever is needed, and the updated
+ * state is saved back to the SAME session file.
  *
- * If --session names an existing saved session, its cookies are pre-loaded
- * as a starting point (useful for refreshing expired auth).
+ * Unlike `login --session=<name>`, refresh REQUIRES the session to already
+ * exist (errors if not found). If --url is omitted, navigates to the
+ * session's lastUrl.
  *
  * In TTY environments, waits for Enter. In non-TTY (Claude Code, CI), waits
  * for the browser window to be closed.
  *
  * Usage:
- *   playwright-cli-sessions login https://github.com --session=gabriel-platforms
- *   playwright-cli-sessions login https://github.com --channel=chrome
- *   playwright-cli-sessions login https://github.com  # auto-names with timestamp
+ *   playwright-cli-sessions refresh donna --url=https://tinder.com
+ *   playwright-cli-sessions refresh donna          # uses session's lastUrl
  */
 
 import type { BrowserContextOptions } from "playwright";
@@ -22,48 +24,48 @@ import { launchStealthChrome, STEALTH_INIT_SCRIPT } from "../browser-launch.js";
 import { readSaved, saveStorageState } from "../store.js";
 import type { StorageState } from "../store.js";
 
-// Our StorageState has `sameSite: string` but Playwright expects the union type.
-// The data is wire-compatible; use this cast helper to bridge the gap.
 type PlaywrightStorageState = NonNullable<
   BrowserContextOptions["storageState"]
 >;
 const asPlaywrightSS = (ss: StorageState): PlaywrightStorageState =>
   ss as unknown as PlaywrightStorageState;
 
-export interface LoginOptions {
-  session?: string;
+export interface RefreshOptions {
+  url?: string;
   channel?: string;
 }
 
-export async function cmdLogin(
-  url: string,
-  opts: LoginOptions = {},
+export async function cmdRefresh(
+  name: string,
+  opts: RefreshOptions = {},
 ): Promise<void> {
-  const sessionName = opts.session ?? `session-${Date.now()}`;
-
-  let storageState: StorageState | undefined;
-  if (opts.session) {
-    const existing = readSaved(opts.session);
-    if (existing) {
-      storageState = existing.storageState;
-      console.log(`Loading existing session "${opts.session}" as base...`);
-    }
+  const existing = readSaved(name);
+  if (!existing) {
+    throw new Error(
+      `No saved session: "${name}". Use \`login\` to create a new session, or \`list\` to see existing ones.`,
+    );
   }
 
-  console.log(`Opening browser at ${url}...`);
+  const url = opts.url ?? existing.lastUrl;
+  if (!url) {
+    throw new Error(
+      `Session "${name}" has no lastUrl. Provide --url=<url> to specify where to navigate.`,
+    );
+  }
+
+  console.log(`Refreshing session "${name}" at ${url}...`);
   const browser = await launchStealthChrome({
     headless: false,
     channel: opts.channel,
   });
   try {
-    const context = await browser.newContext(
-      storageState ? { storageState: asPlaywrightSS(storageState) } : {},
-    );
+    const context = await browser.newContext({
+      storageState: asPlaywrightSS(existing.storageState),
+    });
     await context.addInitScript(STEALTH_INIT_SCRIPT);
     const page = await context.newPage();
     await page.goto(url);
 
-    // Capture storageState and save — shared between TTY and non-TTY paths.
     let captured = false;
     const captureAndSave = async () => {
       if (captured) return;
@@ -71,12 +73,12 @@ export async function cmdLogin(
       try {
         const currentUrl = page.url();
         const state = (await context.storageState()) as unknown as StorageState;
-        const session = saveStorageState(sessionName, state, currentUrl);
+        const session = saveStorageState(name, state, currentUrl);
         const serviceNames = (session.auth ?? []).map((a) =>
           a.identity ? `${a.service} (${a.identity})` : a.service,
         );
         console.log(
-          `\n✓ Saved session as "${sessionName}" to ~/.playwright-sessions/${sessionName}.json`,
+          `\n✓ Updated session "${name}" in ~/.playwright-sessions/${name}.json`,
         );
         if (serviceNames.length > 0) {
           console.log(`  Detected: ${serviceNames.join(", ")}`);
@@ -91,14 +93,13 @@ export async function cmdLogin(
     };
 
     if (process.stdin.isTTY) {
-      // Interactive terminal: wait for Enter
       const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout,
       });
       await new Promise<void>((resolve) => {
         rl.question(
-          "Log in in the browser, then press Enter here to save the session... ",
+          "Re-authenticate if needed, then press Enter to save... ",
           () => {
             rl.close();
             resolve();
@@ -107,21 +108,13 @@ export async function cmdLogin(
       });
       await captureAndSave();
     } else {
-      // Non-TTY (Claude Code, CI, piped stdin): wait for browser close
-      console.log(
-        "Non-TTY detected. Close the browser window when done logging in.",
-      );
-      // Capture storageState when the page closes — context is still alive at this
-      // point so storageState() works. By the time context.on('close') or
-      // browser.on('disconnected') fires, the context is already torn down.
+      console.log("Non-TTY detected. Close the browser window when done.");
       page.on("close", async () => {
         await captureAndSave();
       });
-      // Wait for the browser process to fully disconnect
       await new Promise<void>((resolve) => {
         browser.on("disconnected", () => resolve());
       });
-      // Belt-and-suspenders: try again in case page.on('close') didn't fire
       await captureAndSave();
     }
 

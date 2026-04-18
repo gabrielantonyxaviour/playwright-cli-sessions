@@ -21,11 +21,12 @@ playwright-cli-sessions tag <name> <service> [identity]
 playwright-cli-sessions delete <name>
 playwright-cli-sessions probe <name> [--service=X]
 playwright-cli-sessions install --skills
-playwright-cli-sessions screenshot <url> [--session=<name>] [--out=<path>]
-playwright-cli-sessions navigate <url> [--session=<name>] [--snapshot]
-playwright-cli-sessions snapshot <url> [--session=<name>]
-playwright-cli-sessions exec <script> [<url>] [--session=<name>]
-playwright-cli-sessions login <url> [--session=<name>]
+playwright-cli-sessions screenshot <url> [--session=<name>] [--out=<path>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>] [--full-page]
+playwright-cli-sessions navigate <url> [--session=<name>] [--snapshot] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+playwright-cli-sessions snapshot <url> [--session=<name>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+playwright-cli-sessions exec <script> [<url>] [--session=<name>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]
+playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]
 ```
 
 ### `list`
@@ -93,9 +94,10 @@ playwright-cli-sessions install --skills
 
 ## Browser automation (v0.2.0+)
 
-These commands launch a headless Chromium browser directly — no running
+These commands launch a headless Chrome browser directly — no running
 `playwright-cli` instance needed. Pass `--session=<name>` to any command to
-pre-load a saved session's cookies into the browser context.
+pre-load a saved session's cookies into the browser context. Pass `--headed`
+to open a visible browser window instead of running headless.
 
 > **Prerequisite:** run `npx playwright install chromium` once after installing.
 
@@ -111,7 +113,12 @@ playwright-cli-sessions screenshot https://github.com --session=gabriel-platform
 
 Options:
 - `--session=<name>` — load a saved session's cookies (optional)
-- `--out=<path>` — output PNG path (default: `/tmp/screenshot-<ts>.png`)
+- `--out=<path>` — output PNG path (default: `/tmp/screenshot-<ts>.png`). Parent directory is auto-created.
+- `--headed` — open a visible browser window (default: headless)
+- `--channel=<channel>` — browser channel: `chrome` (default), `msedge`, etc.
+- `--wait-for=<selector>` — CSS selector to wait for after navigation (strongly recommended for dynamic pages to avoid blank captures)
+- `--wait-until=<event>` — Playwright `waitUntil`: `load` | `domcontentloaded` (default) | `networkidle` | `commit`
+- `--full-page` — capture the full scrollable page (default: viewport only)
 
 ### `navigate <url>`
 
@@ -130,6 +137,10 @@ playwright-cli-sessions navigate https://github.com --session=gabriel-platforms 
 Options:
 - `--session=<name>` — load a saved session's cookies (optional)
 - `--snapshot` — print the ARIA accessibility tree after navigating
+- `--headed` — open a visible browser window (default: headless)
+- `--channel=<channel>` — browser channel: `chrome` (default), `msedge`, etc.
+- `--wait-for=<selector>` — CSS selector to wait for after navigation
+- `--wait-until=<event>` — Playwright `waitUntil`: `load` | `domcontentloaded` (default) | `networkidle` | `commit`
 
 ### `snapshot <url>`
 
@@ -141,16 +152,22 @@ playwright-cli-sessions snapshot https://github.com --session=gabriel-platforms
 
 Options:
 - `--session=<name>` — load a saved session's cookies (optional)
+- `--headed` — open a visible browser window (default: headless)
+- `--channel=<channel>` — browser channel: `chrome` (default), `msedge`, etc.
+- `--wait-for=<selector>` — CSS selector to wait for after navigation
+- `--wait-until=<event>` — Playwright `waitUntil`: `load` | `domcontentloaded` (default) | `networkidle` | `commit`
 
 ### `exec <script> [<url>]`
 
 Run a custom automation script against a page. The script must export a
-`run({ page })` function and can return a value (printed to stdout):
+`run({ page, context, browser })` function and can return a value (printed to stdout):
 
 ```js
 // /tmp/my-script.mjs
-export async function run({ page }) {
+export async function run({ page, context, browser }) {
   await page.goto("https://github.com");
+  // context and browser give access to the full Playwright API
+  // — multi-tab flows, cookies, tracing, etc.
   return await page.title();
 }
 ```
@@ -165,6 +182,10 @@ playwright-cli-sessions exec /tmp/my-script.mjs https://github.com --session=gab
 
 Options:
 - `--session=<name>` — load a saved session's cookies (optional)
+- `--headed` — open a visible browser window (default: headless)
+- `--channel=<channel>` — browser channel: `chrome` (default), `msedge`, etc.
+- `--wait-for=<selector>` — CSS selector to wait for after navigation (only applies when `<url>` is given)
+- `--wait-until=<event>` — Playwright `waitUntil`: `load` | `domcontentloaded` (default) | `networkidle` | `commit`
 - Second positional argument `<url>` — navigate before calling `run()` (optional; script may navigate itself)
 
 ### `login <url>`
@@ -179,8 +200,34 @@ playwright-cli-sessions login https://github.com --session=my-github
 #   Detected: GitHub (yourname)
 ```
 
+In non-TTY environments (Claude Code, CI, piped stdin), the command waits for
+the browser window to be closed instead of waiting for Enter.
+
 Options:
 - `--session=<name>` — set the save name, and optionally pre-load an existing session as a base
+- `--channel=<channel>` — browser channel: `chrome` (default), `msedge`, etc.
+
+### `refresh <name>`
+
+Re-open an existing saved session in a browser so you can re-authenticate
+(e.g. after a session expires). Cookies are pre-loaded, and the updated state
+is saved back to the same session file:
+
+```bash
+playwright-cli-sessions refresh donna --url=https://tinder.com
+# Opens browser with donna's cookies → re-authenticate → close browser or press Enter
+# ✓ Updated session "donna" in ~/.playwright-sessions/donna.json
+
+# Omit --url to navigate to the session's last URL:
+playwright-cli-sessions refresh donna
+```
+
+Unlike `login --session=<name>`, `refresh` requires the session to already
+exist and errors if not found.
+
+Options:
+- `--url=<url>` — URL to navigate to (default: session's `lastUrl`)
+- `--channel=<channel>` — browser channel: `chrome` (default), `msedge`, etc.
 
 ## Interoperability
 

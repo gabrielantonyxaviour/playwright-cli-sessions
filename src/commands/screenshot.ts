@@ -9,7 +9,8 @@
  */
 
 import type { BrowserContextOptions } from "playwright";
-import { resolve } from "node:path";
+import { mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { launchStealthChrome, STEALTH_INIT_SCRIPT } from "../browser-launch.js";
 import { readSaved } from "../store.js";
@@ -26,6 +27,11 @@ const asPlaywrightSS = (ss: StorageState): PlaywrightStorageState =>
 export interface ScreenshotOptions {
   session?: string;
   out?: string;
+  channel?: string;
+  headed?: boolean;
+  waitUntil?: "load" | "domcontentloaded" | "networkidle" | "commit";
+  waitFor?: string;
+  fullPage?: boolean;
 }
 
 export async function cmdScreenshot(
@@ -35,6 +41,9 @@ export async function cmdScreenshot(
   const outPath = opts.out
     ? resolve(opts.out)
     : resolve(tmpdir(), `screenshot-${Date.now()}.png`);
+
+  // Ensure parent directory exists — Playwright's screenshot() will ENOENT otherwise
+  mkdirSync(dirname(outPath), { recursive: true });
 
   let storageState: StorageState | undefined;
   if (opts.session) {
@@ -47,7 +56,10 @@ export async function cmdScreenshot(
     storageState = saved.storageState;
   }
 
-  const browser = await launchStealthChrome({ headless: true });
+  const browser = await launchStealthChrome({
+    headless: !opts.headed,
+    channel: opts.channel,
+  });
   try {
     const context = await browser.newContext(
       storageState ? { storageState: asPlaywrightSS(storageState) } : {},
@@ -55,8 +67,17 @@ export async function cmdScreenshot(
     await context.addInitScript(STEALTH_INIT_SCRIPT);
     try {
       const page = await context.newPage();
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-      await page.screenshot({ path: outPath, fullPage: false });
+      await page.goto(url, {
+        waitUntil: opts.waitUntil ?? "domcontentloaded",
+        timeout: 30000,
+      });
+      if (opts.waitFor) {
+        await page.waitForSelector(opts.waitFor, { timeout: 30000 });
+      }
+      await page.screenshot({
+        path: outPath,
+        fullPage: opts.fullPage === true,
+      });
       const title = await page.title();
       console.log(`✓ Screenshot saved to ${outPath}`);
       console.log(`  Page: ${title} — ${page.url()}`);

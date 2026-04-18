@@ -16,11 +16,12 @@
  *   playwright-cli-sessions probe <name> [--service=X]
  *   playwright-cli-sessions install --skills
  *   playwright-cli-sessions health
- *   playwright-cli-sessions screenshot <url> [--session=<name>] [--out=<path>]
- *   playwright-cli-sessions navigate <url> [--session=<name>] [--snapshot]
- *   playwright-cli-sessions snapshot <url> [--session=<name>]
- *   playwright-cli-sessions exec <script> [<url>] [--session=<name>]
- *   playwright-cli-sessions login <url> [--session=<name>]
+ *   playwright-cli-sessions screenshot <url> [--session=<name>] [--out=<path>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>] [--full-page]
+ *   playwright-cli-sessions navigate <url> [--session=<name>] [--snapshot] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+ *   playwright-cli-sessions snapshot <url> [--session=<name>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+ *   playwright-cli-sessions exec <script> [<url>] [--session=<name>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+ *   playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]
+ *   playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]
  */
 
 import { cmdList } from "./commands/list.js";
@@ -37,6 +38,7 @@ import { cmdNavigate } from "./commands/navigate.js";
 import { cmdSnapshot } from "./commands/snapshot.js";
 import { cmdExec } from "./commands/exec.js";
 import { cmdLogin } from "./commands/login.js";
+import { cmdRefresh } from "./commands/refresh.js";
 
 const args = process.argv.slice(2);
 
@@ -61,6 +63,25 @@ function parseFlags(argv: string[]): {
   return { positional, flags };
 }
 
+type WaitUntil = "load" | "domcontentloaded" | "networkidle" | "commit";
+const VALID_WAIT_UNTIL: ReadonlyArray<WaitUntil> = [
+  "load",
+  "domcontentloaded",
+  "networkidle",
+  "commit",
+];
+function parseWaitUntil(
+  value: string | boolean | undefined,
+): WaitUntil | undefined {
+  if (typeof value !== "string") return undefined;
+  if ((VALID_WAIT_UNTIL as ReadonlyArray<string>).includes(value)) {
+    return value as WaitUntil;
+  }
+  throw new Error(
+    `Invalid --wait-until="${value}". Valid values: ${VALID_WAIT_UNTIL.join(", ")}`,
+  );
+}
+
 function usage(): void {
   console.log(
     `
@@ -76,11 +97,12 @@ Usage:
   playwright-cli-sessions probe <name> [--service=X]
   playwright-cli-sessions install --skills
   playwright-cli-sessions health
-  playwright-cli-sessions screenshot <url> [--session=<name>] [--out=<path>]
-  playwright-cli-sessions navigate <url> [--session=<name>] [--snapshot]
-  playwright-cli-sessions snapshot <url> [--session=<name>]
-  playwright-cli-sessions exec <script> [<url>] [--session=<name>]
-  playwright-cli-sessions login <url> [--session=<name>]
+  playwright-cli-sessions screenshot <url> [--session=<name>] [--out=<path>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>] [--full-page]
+  playwright-cli-sessions navigate <url> [--session=<name>] [--snapshot] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+  playwright-cli-sessions snapshot <url> [--session=<name>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+  playwright-cli-sessions exec <script> [<url>] [--session=<name>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+  playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]
+  playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]
 
 Commands:
   list        List saved sessions with live probe status (cached 1h)
@@ -92,39 +114,53 @@ Commands:
   probe       Run live HTTP probes for a session's services
   install     Install skill files into <cwd>/.claude/skills/
   health      Probe all sessions, notify on dead transitions (for LaunchAgent)
-  screenshot  Navigate to a URL and save a PNG screenshot
-  navigate    Navigate to a URL and print page info (optionally with ARIA tree)
-  snapshot    Navigate to a URL and print the ARIA accessibility tree
-  exec        Run a custom script (exports run({ page })) against a page
-  login       Open a browser for interactive login and save the session
-
-Options for list:
-  --probe=false   Skip network calls, use cookie-expiry metadata only
-  --json          Output JSON instead of human-readable text
-
-Options for probe:
-  --service=X     Probe only the named service
-
-Options for install:
-  --skills        Copy skill files into .claude/skills/playwright-cli-sessions/
+  screenshot  Navigate to a URL and save a PNG screenshot (headless by default)
+  navigate    Navigate to a URL and print page info (headless by default)
+  snapshot    Navigate to a URL and print the ARIA accessibility tree (headless by default)
+  exec        Run a custom script (exports run({ page, context, browser })) against a page (headless by default)
+  login       Open a visible browser for interactive login and save the session
+  refresh     Re-open an existing session to re-authenticate and update it
 
 Options for screenshot:
-  --session=<name>  Load a saved session's cookies (optional)
-  --out=<path>      Output PNG path (default: /tmp/screenshot-<ts>.png)
+  --session=<name>      Load a saved session's cookies (optional)
+  --out=<path>          Output PNG path (default: /tmp/screenshot-<ts>.png; parent dir auto-created)
+  --headed              Open a visible browser window (default: headless)
+  --channel=<channel>   Browser channel: "chrome" (default), "msedge", etc.
+  --wait-for=<selector> CSS selector to wait for after navigation (recommended to avoid blank captures)
+  --wait-until=<event>  Playwright waitUntil: load | domcontentloaded (default) | networkidle | commit
+  --full-page           Capture the full scrollable page (default: viewport only)
 
 Options for navigate:
-  --session=<name>  Load a saved session's cookies (optional)
-  --snapshot        Also print the ARIA accessibility tree
+  --session=<name>      Load a saved session's cookies (optional)
+  --snapshot            Also print the ARIA accessibility tree
+  --headed              Open a visible browser window (default: headless)
+  --channel=<channel>   Browser channel: "chrome" (default), "msedge", etc.
+  --wait-for=<selector> CSS selector to wait for after navigation
+  --wait-until=<event>  Playwright waitUntil: load | domcontentloaded (default) | networkidle | commit
 
 Options for snapshot:
-  --session=<name>  Load a saved session's cookies (optional)
+  --session=<name>      Load a saved session's cookies (optional)
+  --headed              Open a visible browser window (default: headless)
+  --channel=<channel>   Browser channel: "chrome" (default), "msedge", etc.
+  --wait-for=<selector> CSS selector to wait for after navigation
+  --wait-until=<event>  Playwright waitUntil: load | domcontentloaded (default) | networkidle | commit
 
 Options for exec:
-  --session=<name>  Load a saved session's cookies (optional)
+  --session=<name>      Load a saved session's cookies (optional)
+  --headed              Open a visible browser window (default: headless)
+  --channel=<channel>   Browser channel: "chrome" (default), "msedge", etc.
+  --wait-for=<selector> CSS selector to wait for after navigation (only applies when <url> is given)
+  --wait-until=<event>  Playwright waitUntil: load | domcontentloaded (default) | networkidle | commit
+  Script must export: async function run({ page, context, browser }) { ... }
   The second positional argument <url> is optional — the script may navigate itself.
 
 Options for login:
-  --session=<name>  Pre-load an existing session or set the save name
+  --session=<name>    Pre-load an existing session or set the save name
+  --channel=<channel> Browser channel: "chrome" (default), "msedge", etc.
+
+Options for refresh:
+  --url=<url>         URL to navigate to (default: session's lastUrl)
+  --channel=<channel> Browser channel: "chrome" (default), "msedge", etc.
 
 Sessions are stored in ~/.playwright-sessions/ — interoperable with playwright-sessions MCP.
 Note: Browser commands require Chromium. Run \`npx playwright install chromium\` if not installed.
@@ -257,9 +293,16 @@ async function main(): Promise<void> {
         }
         const session = flags["session"];
         const out = flags["out"];
+        const channel = flags["channel"];
+        const waitFor = flags["wait-for"];
         await cmdScreenshot(url, {
           session: typeof session === "string" ? session : undefined,
           out: typeof out === "string" ? out : undefined,
+          channel: typeof channel === "string" ? channel : undefined,
+          headed: flags["headed"] === true,
+          waitUntil: parseWaitUntil(flags["wait-until"]),
+          waitFor: typeof waitFor === "string" ? waitFor : undefined,
+          fullPage: flags["full-page"] === true,
         });
         break;
       }
@@ -273,9 +316,15 @@ async function main(): Promise<void> {
           process.exit(1);
         }
         const session = flags["session"];
+        const channel = flags["channel"];
+        const waitFor = flags["wait-for"];
         await cmdNavigate(url, {
           session: typeof session === "string" ? session : undefined,
           snapshot: flags["snapshot"] === true,
+          channel: typeof channel === "string" ? channel : undefined,
+          headed: flags["headed"] === true,
+          waitUntil: parseWaitUntil(flags["wait-until"]),
+          waitFor: typeof waitFor === "string" ? waitFor : undefined,
         });
         break;
       }
@@ -289,8 +338,14 @@ async function main(): Promise<void> {
           process.exit(1);
         }
         const session = flags["session"];
+        const channel = flags["channel"];
+        const waitFor = flags["wait-for"];
         await cmdSnapshot(url, {
           session: typeof session === "string" ? session : undefined,
+          channel: typeof channel === "string" ? channel : undefined,
+          headed: flags["headed"] === true,
+          waitUntil: parseWaitUntil(flags["wait-until"]),
+          waitFor: typeof waitFor === "string" ? waitFor : undefined,
         });
         break;
       }
@@ -305,9 +360,15 @@ async function main(): Promise<void> {
         }
         const url = rest[1];
         const session = flags["session"];
+        const channel = flags["channel"];
+        const waitFor = flags["wait-for"];
         await cmdExec(scriptPath, {
           session: typeof session === "string" ? session : undefined,
           url: url ?? undefined,
+          channel: typeof channel === "string" ? channel : undefined,
+          headed: flags["headed"] === true,
+          waitUntil: parseWaitUntil(flags["wait-until"]),
+          waitFor: typeof waitFor === "string" ? waitFor : undefined,
         });
         break;
       }
@@ -316,13 +377,32 @@ async function main(): Promise<void> {
         const url = rest[0];
         if (!url) {
           console.error(
-            "Error: login requires a URL.\n  playwright-cli-sessions login <url> [--session=<name>]",
+            "Error: login requires a URL.\n  playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]",
           );
           process.exit(1);
         }
         const session = flags["session"];
+        const channel = flags["channel"];
         await cmdLogin(url, {
           session: typeof session === "string" ? session : undefined,
+          channel: typeof channel === "string" ? channel : undefined,
+        });
+        break;
+      }
+
+      case "refresh": {
+        const name = rest[0];
+        if (!name) {
+          console.error(
+            "Error: refresh requires a session name.\n  playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]",
+          );
+          process.exit(1);
+        }
+        const url = flags["url"];
+        const channel = flags["channel"];
+        await cmdRefresh(name, {
+          url: typeof url === "string" ? url : undefined,
+          channel: typeof channel === "string" ? channel : undefined,
         });
         break;
       }

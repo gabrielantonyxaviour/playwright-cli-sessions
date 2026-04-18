@@ -1,6 +1,14 @@
 /**
  * Shared browser-launch helper for every CLI command that spawns Chromium.
  *
+ * ⚠️  ARCHITECTURAL CONSTRAINT — DO NOT POLL BROWSER APIs
+ * ────────────────────────────────────────────────────────
+ * NEVER call storageState(), page.evaluate(), or any Playwright browser API
+ * on a recurring timer (setInterval / setTimeout loop). On macOS, each call
+ * activates the browser window and steals OS-level focus, making the machine
+ * unusable. The only safe pattern is a single capture triggered by a user
+ * action (Enter key press or browser window close).
+ *
  * What this solves
  * ----------------
  * Playwright's default "bundled Chromium" is actually **Chrome for Testing** —
@@ -32,6 +40,8 @@ import type { Browser, LaunchOptions } from "playwright";
 
 export interface LaunchOpts {
   headless?: boolean;
+  /** Browser channel — "chrome" (default), "msedge", or omit for bundled Chromium. */
+  channel?: string;
   /** Extra launch args appended to the stealth defaults. */
   args?: string[];
   /** Extra ignoreDefaultArgs entries appended to the stealth defaults. */
@@ -62,7 +72,7 @@ export async function launchStealthChrome(
   }
 
   return chromium.launch({
-    channel: "chrome",
+    channel: opts.channel ?? "chrome",
     headless,
     args: [...STEALTH_ARGS, ...(opts.args ?? [])],
     ignoreDefaultArgs: [...STEALTH_IGNORE, ...(opts.ignoreDefaultArgs ?? [])],

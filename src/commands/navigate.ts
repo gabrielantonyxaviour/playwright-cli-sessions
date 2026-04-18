@@ -24,6 +24,10 @@ const asPlaywrightSS = (ss: StorageState): PlaywrightStorageState =>
 export interface NavigateOptions {
   session?: string;
   snapshot?: boolean;
+  channel?: string;
+  headed?: boolean;
+  waitUntil?: "load" | "domcontentloaded" | "networkidle" | "commit";
+  waitFor?: string;
 }
 
 export async function cmdNavigate(
@@ -41,7 +45,10 @@ export async function cmdNavigate(
     storageState = saved.storageState;
   }
 
-  const browser = await launchStealthChrome({ headless: true });
+  const browser = await launchStealthChrome({
+    headless: !opts.headed,
+    channel: opts.channel,
+  });
   try {
     const context = await browser.newContext(
       storageState ? { storageState: asPlaywrightSS(storageState) } : {},
@@ -49,7 +56,13 @@ export async function cmdNavigate(
     await context.addInitScript(STEALTH_INIT_SCRIPT);
     try {
       const page = await context.newPage();
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.goto(url, {
+        waitUntil: opts.waitUntil ?? "domcontentloaded",
+        timeout: 30000,
+      });
+      if (opts.waitFor) {
+        await page.waitForSelector(opts.waitFor, { timeout: 30000 });
+      }
       const title = await page.title();
       console.log(`✓ Navigated to ${page.url()}`);
       console.log(`  Title: ${title}`);

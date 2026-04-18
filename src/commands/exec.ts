@@ -2,7 +2,7 @@
  * exec <script> [<url>] [--session=<name>]
  *
  * Run a custom script against a page. The script must export a `run` function:
- *   export async function run({ page }) { ... return result; }
+ *   export async function run({ page, context, browser }) { ... return result; }
  *
  * Usage:
  *   playwright-cli-sessions exec /tmp/my-script.mjs https://github.com --session=gabriel-platforms
@@ -11,7 +11,12 @@
  * The return value of run() is printed to stdout (string as-is, objects as JSON).
  */
 
-import type { BrowserContextOptions, Page } from "playwright";
+import type {
+  Browser,
+  BrowserContext,
+  BrowserContextOptions,
+  Page,
+} from "playwright";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { launchStealthChrome, STEALTH_INIT_SCRIPT } from "../browser-launch.js";
@@ -29,10 +34,18 @@ const asPlaywrightSS = (ss: StorageState): PlaywrightStorageState =>
 export interface ExecOptions {
   session?: string;
   url?: string;
+  channel?: string;
+  headed?: boolean;
+  waitUntil?: "load" | "domcontentloaded" | "networkidle" | "commit";
+  waitFor?: string;
 }
 
 interface ScriptModule {
-  run?: (args: { page: Page }) => Promise<unknown>;
+  run?: (args: {
+    page: Page;
+    context: BrowserContext;
+    browser: Browser;
+  }) => Promise<unknown>;
 }
 
 export async function cmdExec(
@@ -46,7 +59,7 @@ export async function cmdExec(
 
   if (typeof run !== "function") {
     throw new Error(
-      `Script must export a "run" function:\n  export async function run({ page }) { ... }`,
+      `Script must export a "run" function:\n  export async function run({ page, context, browser }) { ... }`,
     );
   }
 
@@ -61,7 +74,10 @@ export async function cmdExec(
     storageState = saved.storageState;
   }
 
-  const browser = await launchStealthChrome({ headless: true });
+  const browser = await launchStealthChrome({
+    headless: !opts.headed,
+    channel: opts.channel,
+  });
   try {
     const context = await browser.newContext(
       storageState ? { storageState: asPlaywrightSS(storageState) } : {},
@@ -72,12 +88,15 @@ export async function cmdExec(
 
       if (opts.url) {
         await page.goto(opts.url, {
-          waitUntil: "domcontentloaded",
+          waitUntil: opts.waitUntil ?? "domcontentloaded",
           timeout: 30000,
         });
+        if (opts.waitFor) {
+          await page.waitForSelector(opts.waitFor, { timeout: 30000 });
+        }
       }
 
-      const result = await run({ page });
+      const result = await run({ page, context, browser });
 
       if (result !== undefined) {
         if (typeof result === "string") {

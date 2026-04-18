@@ -171,6 +171,12 @@ export function saveStorageState(
   const autoDetected = detectAuth(storageState);
   const auth = mergeAuth(autoDetected, existing?.auth);
 
+  if (!storageState.origins || storageState.origins.length === 0) {
+    console.warn(
+      "Warning: no localStorage origins captured. Some services (e.g. Tinder) store auth in localStorage.",
+    );
+  }
+
   const session: SavedSession = {
     name,
     storageState,
