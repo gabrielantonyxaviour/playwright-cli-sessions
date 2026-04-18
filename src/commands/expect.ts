@@ -34,6 +34,7 @@ import { readSaved } from "../store.js";
 import type { StorageState } from "../store.js";
 import { PcsError } from "../errors.js";
 import { checkAuthWall } from "../auth-wall.js";
+import { checkSessionFreshness } from "../session-use.js";
 import { dirname } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
 
@@ -56,6 +57,7 @@ export interface ExpectOptions {
   waitUntil?: "load" | "domcontentloaded" | "networkidle" | "commit";
   headed?: boolean;
   screenshotOnFail?: string;
+  noProbe?: boolean;
 }
 
 /**
@@ -195,6 +197,7 @@ export async function cmdExpect(
         { session: opts.session },
       );
     }
+    await checkSessionFreshness(opts.session, saved, { noProbe: opts.noProbe });
     storageState = saved.storageState;
   }
 

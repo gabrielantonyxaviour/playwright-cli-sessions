@@ -26,6 +26,7 @@ import {
 import { readSaved } from "../store.js";
 import type { StorageState } from "../store.js";
 import { PcsError } from "../errors.js";
+import { checkSessionFreshness } from "../session-use.js";
 
 // Our StorageState has `sameSite: string` but Playwright expects the union type.
 // The data is wire-compatible; use this cast helper to bridge the gap.
@@ -42,6 +43,7 @@ export interface ExecOptions {
   headed?: boolean;
   waitUntil?: "load" | "domcontentloaded" | "networkidle" | "commit";
   waitFor?: string;
+  noProbe?: boolean;
 }
 
 interface ScriptModule {
@@ -79,6 +81,7 @@ export async function cmdExec(
         { session: opts.session },
       );
     }
+    await checkSessionFreshness(opts.session, saved, { noProbe: opts.noProbe });
     storageState = saved.storageState;
   }
 

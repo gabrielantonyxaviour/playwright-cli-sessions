@@ -90,6 +90,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "wait-for",
     "wait-until",
     "full-page",
+    "no-probe",
   ],
   navigate: [
     "session",
@@ -98,9 +99,25 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "channel",
     "wait-for",
     "wait-until",
+    "no-probe",
   ],
-  snapshot: ["session", "headed", "channel", "wait-for", "wait-until"],
-  exec: ["session", "url", "headed", "channel", "wait-for", "wait-until"],
+  snapshot: [
+    "session",
+    "headed",
+    "channel",
+    "wait-for",
+    "wait-until",
+    "no-probe",
+  ],
+  exec: [
+    "session",
+    "url",
+    "headed",
+    "channel",
+    "wait-for",
+    "wait-until",
+    "no-probe",
+  ],
   login: ["session", "channel"],
   refresh: ["url", "channel"],
   expect: [
@@ -116,6 +133,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "wait-until",
     "screenshot-on-fail",
     "headed",
+    "no-probe",
   ],
   report: ["context", "no-notify"],
   reports: ["limit", "json"],
@@ -479,6 +497,7 @@ async function main(): Promise<void> {
           waitUntil: parseWaitUntil(flags["wait-until"]),
           waitFor: typeof waitFor === "string" ? waitFor : undefined,
           fullPage: flags["full-page"] === true,
+          noProbe: flags["no-probe"] === true,
         });
         break;
       }
@@ -501,6 +520,7 @@ async function main(): Promise<void> {
           headed: flags["headed"] === true,
           waitUntil: parseWaitUntil(flags["wait-until"]),
           waitFor: typeof waitFor === "string" ? waitFor : undefined,
+          noProbe: flags["no-probe"] === true,
         });
         break;
       }
@@ -522,6 +542,7 @@ async function main(): Promise<void> {
           headed: flags["headed"] === true,
           waitUntil: parseWaitUntil(flags["wait-until"]),
           waitFor: typeof waitFor === "string" ? waitFor : undefined,
+          noProbe: flags["no-probe"] === true,
         });
         break;
       }
@@ -545,6 +566,7 @@ async function main(): Promise<void> {
           headed: flags["headed"] === true,
           waitUntil: parseWaitUntil(flags["wait-until"]),
           waitFor: typeof waitFor === "string" ? waitFor : undefined,
+          noProbe: flags["no-probe"] === true,
         });
         break;
       }
@@ -653,6 +675,7 @@ async function main(): Promise<void> {
             ? { screenshotOnFail: screenshotOnFailFlag }
             : {}),
           headed: flags["headed"] === true,
+          noProbe: flags["no-probe"] === true,
         });
         break;
       }

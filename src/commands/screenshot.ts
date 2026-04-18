@@ -20,6 +20,7 @@ import { readSaved } from "../store.js";
 import type { StorageState } from "../store.js";
 import { PcsError } from "../errors.js";
 import { checkAuthWall } from "../auth-wall.js";
+import { checkSessionFreshness } from "../session-use.js";
 
 // Our StorageState has `sameSite: string` but Playwright expects the union type.
 // The data is wire-compatible; use this cast helper to bridge the gap.
@@ -37,6 +38,7 @@ export interface ScreenshotOptions {
   waitUntil?: "load" | "domcontentloaded" | "networkidle" | "commit";
   waitFor?: string;
   fullPage?: boolean;
+  noProbe?: boolean;
 }
 
 export async function cmdScreenshot(
@@ -60,6 +62,7 @@ export async function cmdScreenshot(
         { session: opts.session },
       );
     }
+    await checkSessionFreshness(opts.session, saved, { noProbe: opts.noProbe });
     storageState = saved.storageState;
   }
 

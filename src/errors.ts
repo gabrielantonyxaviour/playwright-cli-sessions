@@ -1,6 +1,7 @@
 export type PcsErrorCode =
   | "PCS_AUTH_WALL"
   | "PCS_AUTH_EXPIRED"
+  | "PCS_STALE_SESSION"
   | "PCS_SELECTOR_TIMEOUT"
   | "PCS_NAV_FAILED"
   | "PCS_NETWORK"
@@ -25,6 +26,7 @@ export class PcsError extends Error {
 export const EXIT_CODE_MAP: Record<PcsErrorCode, number> = {
   PCS_AUTH_WALL: 77,
   PCS_AUTH_EXPIRED: 77,
+  PCS_STALE_SESSION: 77,
   PCS_SELECTOR_TIMEOUT: 10,
   PCS_NAV_FAILED: 11,
   PCS_NETWORK: 12,

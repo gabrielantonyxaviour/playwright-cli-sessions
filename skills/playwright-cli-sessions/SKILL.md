@@ -156,6 +156,33 @@ didn't ask for.
 If in doubt: stay headless. The human can always re-run with `--headed` if
 they want to watch. You cannot take back a visible window they didn't want.
 
+## Session staleness check (v0.4.1+)
+
+Every browser-automation command that takes `--session=<name>` runs a lightweight
+probe **before** launching the browser if the session's last probe is more than
+**6 hours** old (or has never been probed). Closes the silent-corruption gap
+where saved sessions go dead overnight and agents hit them the next morning
+with invalid cookies.
+
+| Result | Action |
+|--------|--------|
+| Probe says **LIVE** | Cache updated; one-line stderr note; browser launches |
+| Probe says **DEAD** | Exit **77** (`PCS_STALE_SESSION`) + `"refresh <name>"` suggestion; no browser launched |
+| No probe endpoint for service | Treated as LIVE (benefit of the doubt) |
+| Fresh cache (< threshold) | No probe; browser launches immediately |
+
+**Opt-out per call:** `--no-probe` flag.
+**Opt-out globally:** `PLAYWRIGHT_CLI_NO_STALE_CHECK=1`.
+**Threshold override (hours):** `PLAYWRIGHT_CLI_STALE_HOURS=<N>` (default `6`; `0` forces probe every time).
+
+When the check fires and the session is dead:
+```
+Error [PCS_STALE_SESSION]: Session "<name>" probe failed (302). Last probed 8h ago.
+  Run: playwright-cli-sessions refresh <name>
+```
+Follow the suggestion: `playwright-cli-sessions refresh <name>` re-opens a headful
+browser for you to re-authenticate, then saves the fresh session.
+
 ## Stealth (v0.3.2+) — Chrome default (v0.4.0+)
 
 Browser automation commands default to real Chrome (`--channel=chrome`) and
@@ -191,6 +218,7 @@ All errors emit `Error [CODE]: message` on stderr. Dispatch on exit code:
 |------|------|---------|
 | 77 | `PCS_AUTH_WALL` | Redirected to a login page — session missing or expired |
 | 77 | `PCS_AUTH_EXPIRED` | Session cookies expired server-side |
+| 77 | `PCS_STALE_SESSION` | Pre-launch probe says session is dead (v0.4.1+) |
 | 3 | `PCS_SESSION_NOT_FOUND` | `--session=<name>` file does not exist |
 | 2 | `PCS_INVALID_FLAG` / `PCS_MISSING_ARG` | Bad or missing argument |
 | 10 | `PCS_SELECTOR_TIMEOUT` | `--wait-for=<selector>` timed out |
@@ -205,7 +233,7 @@ playwright-cli-sessions screenshot https://example.com --waite-for=h1
 
 ## Browser automation commands
 
-All browser commands accept: `--session=<name>`, `--headed` (see rubric above — almost never pass this yourself), `--channel=<chrome|msedge|...>`, `--wait-for=<selector>`, `--wait-until=<load|domcontentloaded|networkidle|commit>`.
+All browser commands accept: `--session=<name>`, `--no-probe` (skip the v0.4.1 staleness check — use when the session is known live or you're intentionally testing with a dead one), `--headed` (see rubric above — almost never pass this yourself), `--channel=<chrome|msedge|...>`, `--wait-for=<selector>`, `--wait-until=<load|domcontentloaded|networkidle|commit>`.
 
 ### screenshot
 
