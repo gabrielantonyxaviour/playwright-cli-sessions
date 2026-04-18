@@ -27,6 +27,8 @@ playwright-cli-sessions snapshot <url> [--session=<name>] [--headed] [--channel=
 playwright-cli-sessions exec <script> [<url>] [--session=<name>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
 playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]
 playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]
+playwright-cli-sessions report "<message>" [--context=<N>]
+playwright-cli-sessions reports [--limit=<N>] [--json]
 ```
 
 ### `list`
@@ -228,6 +230,35 @@ exist and errors if not found.
 Options:
 - `--url=<url>` — URL to navigate to (default: session's `lastUrl`)
 - `--channel=<channel>` — browser channel: `chrome` (default), `msedge`, etc.
+
+## Feedback loop (`report` / `reports`)
+
+This CLI is intended to be used by AI agents as well as humans. When an agent
+hits unexpected behavior, the path of least resistance is often to silently
+fall back to `curl` or a bare Playwright script — hiding the bug from the
+user. The `report` command is the sanctioned alternative:
+
+```bash
+playwright-cli-sessions report "screenshot of gmail.com with session gabriel-platforms returned a 200x200 blank image — expected full-page"
+```
+
+Every report is a markdown file under `~/.playwright-sessions/.reports/`
+stamped with the last ~10 CLI invocations (pulled from the append-only log at
+`~/.playwright-sessions/.usage-log.jsonl`) so the context is never lost.
+
+```bash
+playwright-cli-sessions reports                    # list recent reports
+playwright-cli-sessions reports --limit=5
+playwright-cli-sessions reports --json
+playwright-cli-sessions report "msg" --context=20  # more log context
+```
+
+Every invocation of the CLI — success or failure — is appended to
+`.usage-log.jsonl`. Logging is best-effort and never blocks the primary
+command. Set `PLAYWRIGHT_CLI_SESSIONS_NO_LOG=1` to disable.
+
+The bundled Claude skill (`skills/playwright-cli-sessions/SKILL.md`) tells
+agents: on unexpected behavior, run `report` — do NOT work around the tool.
 
 ## Testing
 

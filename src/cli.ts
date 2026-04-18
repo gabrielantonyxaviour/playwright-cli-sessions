@@ -24,6 +24,7 @@
  *   playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]
  */
 
+import { logUsage } from "./usage-log.js";
 import { cmdList } from "./commands/list.js";
 import { cmdSave } from "./commands/save.js";
 import { cmdRestore } from "./commands/restore.js";
@@ -39,6 +40,7 @@ import { cmdSnapshot } from "./commands/snapshot.js";
 import { cmdExec } from "./commands/exec.js";
 import { cmdLogin } from "./commands/login.js";
 import { cmdRefresh } from "./commands/refresh.js";
+import { cmdReport, cmdReports } from "./commands/report.js";
 
 const args = process.argv.slice(2);
 
@@ -103,6 +105,8 @@ Usage:
   playwright-cli-sessions exec <script> [<url>] [--session=<name>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
   playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]
   playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]
+  playwright-cli-sessions report "<message>" [--context=<N>]
+  playwright-cli-sessions reports [--limit=<N>] [--json]
 
 Commands:
   list        List saved sessions with live probe status (cached 1h)
@@ -120,6 +124,8 @@ Commands:
   exec        Run a custom script (exports run({ page, context, browser })) against a page (headless by default)
   login       Open a visible browser for interactive login and save the session
   refresh     Re-open an existing session to re-authenticate and update it
+  report      File a structured issue report about unexpected CLI behavior
+  reports     List recently filed reports
 
 Options for screenshot:
   --session=<name>      Load a saved session's cookies (optional)
@@ -162,15 +168,57 @@ Options for refresh:
   --url=<url>         URL to navigate to (default: session's lastUrl)
   --channel=<channel> Browser channel: "chrome" (default), "msedge", etc.
 
+Options for report:
+  --context=<N>       Number of recent usage-log entries to embed (default: 10)
+
+Options for reports:
+  --limit=<N>         Max number of reports to show (default: 20)
+  --json              Emit a JSON array instead of human-readable output
+
+Feedback loop:
+  If the CLI does something unexpected, run
+    playwright-cli-sessions report "<what happened>"
+  instead of working around it. Reports are stored under ~/.playwright-sessions/.reports/
+  and include recent CLI invocations (from ~/.playwright-sessions/.usage-log.jsonl) for context.
+
 Sessions are stored in ~/.playwright-sessions/ — interoperable with playwright-sessions MCP.
 Note: Browser commands require Chromium. Run \`npx playwright install chromium\` if not installed.
 `.trim(),
   );
 }
 
+// Captured for the 'exit' listener. Updated in main() as we parse the command
+// and again if we catch an error before process.exit fires.
+let loggedCommand = "unknown";
+let loggedError: string | undefined;
+const startTime = Date.now();
+
+// Best-effort usage logging on every exit path (normal, process.exit, thrown
+// uncaught). 'exit' listeners are synchronous — appendFileSync inside logUsage
+// is fine. Opt-out via PLAYWRIGHT_CLI_SESSIONS_NO_LOG=1 for callers that need
+// a silent CLI (e.g. recursive `report` writing its own log entry).
+process.on("exit", (code) => {
+  if (process.env.PLAYWRIGHT_CLI_SESSIONS_NO_LOG === "1") return;
+  logUsage({
+    cmd: loggedCommand,
+    args,
+    exitCode: code,
+    durationMs: Date.now() - startTime,
+    ...(loggedError ? { error: loggedError } : {}),
+  });
+});
+
+/** Emit a usage error (wrong args) and exit 1 with the error captured in the log. */
+function usageError(message: string): never {
+  loggedError = message;
+  console.error(`Error: ${message}`);
+  process.exit(1);
+}
+
 async function main(): Promise<void> {
   const { positional, flags } = parseFlags(args);
   const [command, ...rest] = positional;
+  if (command) loggedCommand = command;
 
   if (
     !command ||
@@ -178,6 +226,7 @@ async function main(): Promise<void> {
     command === "-h" ||
     command === "help"
   ) {
+    loggedCommand = "help";
     usage();
     process.exit(0);
   }
@@ -407,6 +456,32 @@ async function main(): Promise<void> {
         break;
       }
 
+      case "report": {
+        const message = rest.join(" ").trim();
+        if (!message) {
+          usageError(
+            `report requires a message.\n  playwright-cli-sessions report "<what went wrong>"`,
+          );
+        }
+        const contextFlag = flags["context"];
+        const context =
+          typeof contextFlag === "string"
+            ? parseInt(contextFlag, 10)
+            : undefined;
+        cmdReport(message, { context });
+        break;
+      }
+
+      case "reports": {
+        const limitFlag = flags["limit"];
+        cmdReports({
+          limit:
+            typeof limitFlag === "string" ? parseInt(limitFlag, 10) : undefined,
+          json: flags["json"] === true,
+        });
+        break;
+      }
+
       default:
         console.error(`Unknown command: "${command}"\n`);
         usage();
@@ -414,6 +489,7 @@ async function main(): Promise<void> {
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+    loggedError = message;
     console.error(`Error: ${message}`);
     process.exit(1);
   }
