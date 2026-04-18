@@ -229,6 +229,26 @@ Options:
 - `--url=<url>` — URL to navigate to (default: session's `lastUrl`)
 - `--channel=<channel>` — browser channel: `chrome` (default), `msedge`, etc.
 
+## Testing
+
+The repo ships a scenario harness under `tests/` that exercises every command
+end-to-end against the compiled CLI, with each scenario sandboxed to its own
+temporary `PLAYWRIGHT_SESSIONS_DIR` (so tests never touch your real sessions).
+
+```bash
+npm test                      # run all scenarios
+npm run test:scenarios         # same thing
+bash tests/run.sh screenshot   # run a single scenario
+VERBOSE=1 bash tests/run.sh    # stream each scenario's full output
+```
+
+Full suite runs ~7 scenarios in ~2–3 minutes (headless Chromium against
+`https://example.com` for the browser commands). Scenarios live in
+`tests/scenarios/*.sh` and share assertion helpers in `tests/lib/`.
+
+Tests are designed to be both a safety net and documentation — each scenario's
+header comment lists the cases it covers.
+
 ## Interoperability
 
 Both `playwright-cli-sessions` and `playwright-sessions` MCP share `~/.playwright-sessions/`. Sessions saved by one tool are immediately visible to the other. The probe cache (`.probe-cache.json`) is also shared.
