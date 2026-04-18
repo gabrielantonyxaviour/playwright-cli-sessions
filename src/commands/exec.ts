@@ -4,9 +4,11 @@
  * Run a custom script against a page. The script must export a `run` function:
  *   export async function run({ page, context, browser }) { ... return result; }
  *
- * Usage:
- *   playwright-cli-sessions exec /tmp/my-script.mjs https://github.com --session=gabriel-platforms
- *   playwright-cli-sessions exec /tmp/my-script.mjs  # script navigates itself
+ * Inline eval mode (no file needed):
+ *   playwright-cli-sessions exec --eval='return await page.title()' https://example.com
+ *
+ * Stdin mode:
+ *   echo 'return { u: page.url() }' | playwright-cli-sessions exec - https://example.com
  *
  * The return value of run() is printed to stdout (string as-is, objects as JSON).
  */
@@ -26,6 +28,7 @@ import {
 import { readSaved } from "../store.js";
 import type { StorageState } from "../store.js";
 import { PcsError } from "../errors.js";
+import { applyWaits } from "../wait-orchestrator.js";
 import { checkSessionFreshness } from "../session-use.js";
 
 // Our StorageState has `sameSite: string` but Playwright expects the union type.
@@ -43,7 +46,10 @@ export interface ExecOptions {
   headed?: boolean;
   waitUntil?: "load" | "domcontentloaded" | "networkidle" | "commit";
   waitFor?: string;
+  waitForText?: string;
+  waitForCount?: string;
   noProbe?: boolean;
+  evalScript?: string;
 }
 
 interface ScriptModule {
@@ -54,21 +60,56 @@ interface ScriptModule {
   }) => Promise<unknown>;
 }
 
+type RunFn = (args: {
+  page: Page;
+  context: BrowserContext;
+  browser: Browser;
+}) => Promise<unknown>;
+
+function makeEvalRunner(code: string): RunFn {
+  const fn = new Function(
+    "page",
+    "context",
+    "browser",
+    `return (async function(){ ${code} })()`,
+  );
+  return (ctx) => fn(ctx.page, ctx.context, ctx.browser) as Promise<unknown>;
+}
+
+async function readStdin(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    process.stdin.on("data", (chunk: Buffer) => chunks.push(chunk));
+    process.stdin.on("end", () =>
+      resolve(Buffer.concat(chunks).toString("utf8")),
+    );
+    process.stdin.on("error", reject);
+  });
+}
+
 export async function cmdExec(
   scriptPath: string,
   opts: ExecOptions = {},
 ): Promise<void> {
-  // Load and validate the script before launching the browser
-  const absPath = pathToFileURL(resolve(scriptPath)).href;
-  const mod = (await import(absPath)) as ScriptModule;
-  const run = mod.run;
+  let run: RunFn;
 
-  if (typeof run !== "function") {
-    throw new PcsError(
-      "PCS_INVALID_INPUT",
-      `Script must export a "run" function:\n  export async function run({ page, context, browser }) { ... }`,
-      { scriptPath },
-    );
+  if (opts.evalScript !== undefined) {
+    run = makeEvalRunner(opts.evalScript);
+  } else if (scriptPath === "-") {
+    const code = await readStdin();
+    run = makeEvalRunner(code);
+  } else {
+    const absPath = pathToFileURL(resolve(scriptPath)).href;
+    const mod = (await import(absPath)) as ScriptModule;
+    const runFn = mod.run;
+    if (typeof runFn !== "function") {
+      throw new PcsError(
+        "PCS_INVALID_INPUT",
+        `Script must export a "run" function:\n  export async function run({ page, context, browser }) { ... }`,
+        { scriptPath },
+      );
+    }
+    run = runFn;
   }
 
   let storageState: StorageState | undefined;
@@ -101,13 +142,19 @@ export async function cmdExec(
       const page = await context.newPage();
 
       if (opts.url) {
-        await page.goto(opts.url, {
-          waitUntil: opts.waitUntil ?? "domcontentloaded",
-          timeout: 30000,
-        });
-        if (opts.waitFor) {
-          await page.waitForSelector(opts.waitFor, { timeout: 30000 });
+        try {
+          await page.goto(opts.url, {
+            waitUntil: opts.waitUntil ?? "domcontentloaded",
+            timeout: 30000,
+          });
+        } catch (navErr) {
+          throw new PcsError(
+            "PCS_NAV_FAILED",
+            (navErr as Error).message.split("\n")[0],
+            { url: opts.url },
+          );
         }
+        await applyWaits(page, opts);
       }
 
       const result = await run({ page, context, browser });
