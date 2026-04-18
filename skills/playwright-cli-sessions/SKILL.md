@@ -131,6 +131,31 @@ After this, the session is usable via Workflow B.
 the user to re-run `login` or `refresh`. Do NOT try to automate password entry,
 2FA, CAPTCHA, WebAuthn, or OAuth popups — these always fail.
 
+## Headed vs headless — the CLI decides, not you
+
+Commands already pick the right mode. Do **NOT** pass `--headed` on your own
+initiative — it interrupts the user's workflow with a visible window they
+didn't ask for.
+
+| Command | Default | Rationale |
+|---------|---------|-----------|
+| `screenshot`, `navigate`, `snapshot`, `exec`, `expect` | headless | No human interaction possible or needed. |
+| `login`, `refresh` | **headful** (automatic) | The whole point is the human signs in. |
+
+**Decision rubric for AI sessions:**
+
+- Stateless work → headless. Always.
+- Saved-session work (`--session=<name>`) → headless. The interactive step
+  already happened during `login`; cookies do the work now.
+- Flow hits a login wall / CAPTCHA / 2FA / OAuth popup unexpectedly → **stop,
+  `report` the gap, ask the user to run `login` or `refresh`**. Do not escalate
+  to `--headed` yourself — headful Playwright cannot solve a CAPTCHA either.
+- Only pass `--headed` when the human explicitly says "show me" / "let me
+  watch" / "I need to click through something".
+
+If in doubt: stay headless. The human can always re-run with `--headed` if
+they want to watch. You cannot take back a visible window they didn't want.
+
 ## Stealth (v0.3.2+)
 
 Browser automation commands automatically patch the fingerprint to remove
@@ -144,7 +169,7 @@ macOS, 1 elsewhere). Validated against a real Tinder signup test on 2026-04-18.
 
 ## Browser automation commands
 
-All browser commands accept: `--session=<name>`, `--headed`, `--channel=<chrome|msedge|...>`, `--wait-for=<selector>`, `--wait-until=<load|domcontentloaded|networkidle|commit>`.
+All browser commands accept: `--session=<name>`, `--headed` (see rubric above — almost never pass this yourself), `--channel=<chrome|msedge|...>`, `--wait-for=<selector>`, `--wait-until=<load|domcontentloaded|networkidle|commit>`.
 
 ### screenshot
 
@@ -262,6 +287,14 @@ await page.evaluate(() => {
 });
 ```
 
+**Persistent modal overlays can intercept `page.click()`** — notification
+prompts, cookie banners, app-shell overlays that stay mounted but
+pointer-events-enabled. Field-tested on rax-dev (2026-04-18). Symptom:
+`page.click()` or `locator.click()` hangs or hits the overlay instead of the
+target. Fix: use the `evaluate + dispatchEvent` pattern above. It dispatches
+the MouseEvent directly on the real DOM node, bypassing whatever overlay is
+on top.
+
 ## Interoperability with playwright-sessions MCP
 
 Both tools share `~/.playwright-sessions/`. Sessions saved by one are visible
@@ -276,5 +309,7 @@ See `references/migrating-from-mcp.md` for the MCP tool → CLI command mapping.
 - **Use `--wait-for=<selector>`** on any screenshot/nav to avoid blank captures
 - **Prefer `exec` with a `.mjs` script** over chaining many `navigate` commands
 - **On unexpected behavior: `report`, don't work around** — see top of this file
+- **Default headless; never pass `--headed` unprompted** — the CLI already opens headful for `login`/`refresh`. See "Headed vs headless" rubric.
 - Saved sessions are read-only from CLI — safe for parallel use
 - Expired logins: ask the user to `login` / `refresh`, don't automate creds
+- **Click intercepted by an overlay?** Use `evaluate + dispatchEvent`, not more `locator.click()` retries.
