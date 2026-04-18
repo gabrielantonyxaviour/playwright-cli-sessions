@@ -27,6 +27,7 @@ playwright-cli-sessions snapshot <url> [--session=<name>] [--headed] [--channel=
 playwright-cli-sessions exec <script> [<url>] [--session=<name>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
 playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]
 playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]
+playwright-cli-sessions expect <url> [--title=<substr>] [--selector=<sel>] [--text=<substr>] [--status=<code>] [--session=<name>] [--timeout=<ms>] [--retry=<N>] [--screenshot-on-fail=<path>]
 playwright-cli-sessions report "<message>" [--context=<N>]
 playwright-cli-sessions reports [--limit=<N>] [--json]
 ```
@@ -230,6 +231,40 @@ exist and errors if not found.
 Options:
 - `--url=<url>` — URL to navigate to (default: session's `lastUrl`)
 - `--channel=<channel>` — browser channel: `chrome` (default), `msedge`, etc.
+
+## Shell-native assertions (`expect`)
+
+`expect` is a declarative assertion command: navigate to a URL, check one or
+more page properties, exit 0 on pass or 1 on failure. Write shell-level tests
+without a single `.mjs` file.
+
+```bash
+# Title contains substring
+playwright-cli-sessions expect https://example.com --title="Example Domain"
+
+# A selector is visible
+playwright-cli-sessions expect https://github.com --selector="header nav" \
+  --session=gabriel-platforms
+
+# HTTP status
+playwright-cli-sessions expect https://api.example.com/health --status=200
+
+# Combined — every flag must pass
+playwright-cli-sessions expect https://example.com \
+  --title="Example Domain" --selector=h1 --status=200
+```
+
+Flags:
+- `--title=<substr>` — `page.title()` must include the substring
+- `--selector=<css>` — element must be visible within `--timeout`
+- `--text=<substr>` — text must appear on the page within `--timeout`
+- `--status=<code>` — navigation response HTTP status must equal the code
+- `--timeout=<ms>` — cap on any single expectation wait (default 10000)
+- `--retry=<N>` — retry the whole check N more times with linear backoff (default 0)
+- `--screenshot-on-fail=<path>` — capture a full-page PNG when the check ultimately fails
+- `--session=<name>`, `--channel=<channel>`, `--wait-for=<sel>`, `--wait-until=<event>`, `--headed` — same semantics as other browser commands
+
+At least one of `--title`, `--selector`, `--text`, or `--status` is required.
 
 ## Feedback loop (`report` / `reports`)
 

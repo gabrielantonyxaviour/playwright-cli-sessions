@@ -22,6 +22,9 @@
  *   playwright-cli-sessions exec <script> [<url>] [--session=<name>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
  *   playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]
  *   playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]
+ *   playwright-cli-sessions expect <url> [--title=<substr>] [--selector=<sel>] [--text=<substr>] [--status=<code>] [--session=<name>] [--timeout=<ms>] [--retry=<N>] [--screenshot-on-fail=<path>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+ *   playwright-cli-sessions report "<message>" [--context=<N>]
+ *   playwright-cli-sessions reports [--limit=<N>] [--json]
  */
 
 import { logUsage } from "./usage-log.js";
@@ -41,6 +44,7 @@ import { cmdExec } from "./commands/exec.js";
 import { cmdLogin } from "./commands/login.js";
 import { cmdRefresh } from "./commands/refresh.js";
 import { cmdReport, cmdReports } from "./commands/report.js";
+import { cmdExpect } from "./commands/expect.js";
 
 const args = process.argv.slice(2);
 
@@ -105,6 +109,7 @@ Usage:
   playwright-cli-sessions exec <script> [<url>] [--session=<name>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
   playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]
   playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]
+  playwright-cli-sessions expect <url> [--title=<substr>] [--selector=<sel>] [--text=<substr>] [--status=<code>] [--session=<name>] [--timeout=<ms>] [--retry=<N>] [--screenshot-on-fail=<path>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
   playwright-cli-sessions report "<message>" [--context=<N>]
   playwright-cli-sessions reports [--limit=<N>] [--json]
 
@@ -124,6 +129,7 @@ Commands:
   exec        Run a custom script (exports run({ page, context, browser })) against a page (headless by default)
   login       Open a visible browser for interactive login and save the session
   refresh     Re-open an existing session to re-authenticate and update it
+  expect      Assert page properties (title/selector/text/status) from the shell — exits 0/1
   report      File a structured issue report about unexpected CLI behavior
   reports     List recently filed reports
 
@@ -167,6 +173,20 @@ Options for login:
 Options for refresh:
   --url=<url>         URL to navigate to (default: session's lastUrl)
   --channel=<channel> Browser channel: "chrome" (default), "msedge", etc.
+
+Options for expect:
+  --title=<substr>       page.title() must contain <substr>
+  --selector=<sel>       element matching CSS <sel> must be visible within --timeout
+  --text=<substr>        text <substr> must appear somewhere on the page
+  --status=<code>        navigation response HTTP status must equal <code>
+  --timeout=<ms>         max ms to wait for any single expectation (default 10000)
+  --retry=<N>            retry the whole check N more times on failure (default 0)
+  --session=<name>       Load a saved session's cookies
+  --channel=<channel>    Browser channel: "chrome" (default), "msedge", etc.
+  --wait-for=<selector>  CSS selector to wait for after navigation (pre-check)
+  --wait-until=<event>   Playwright waitUntil: load | domcontentloaded | networkidle | commit
+  --screenshot-on-fail=<path>  Save a full-page screenshot if the check ultimately fails
+  Exits 0 on pass, 1 on failed expectation. At least one expectation flag is required.
 
 Options for report:
   --context=<N>       Number of recent usage-log entries to embed (default: 10)
@@ -478,6 +498,53 @@ async function main(): Promise<void> {
           limit:
             typeof limitFlag === "string" ? parseInt(limitFlag, 10) : undefined,
           json: flags["json"] === true,
+        });
+        break;
+      }
+
+      case "expect": {
+        const url = rest[0];
+        if (!url) {
+          usageError(
+            `expect requires a URL.\n  playwright-cli-sessions expect <url> [--title=<substr>] [--selector=<sel>] [--text=<substr>] [--status=<code>] [--timeout=<ms>] [--retry=<N>]`,
+          );
+        }
+        const titleFlag = flags["title"];
+        const selectorFlag = flags["selector"];
+        const textFlag = flags["text"];
+        const statusFlag = flags["status"];
+        const timeoutFlag = flags["timeout"];
+        const retryFlag = flags["retry"];
+        const sessionFlag = flags["session"];
+        const channelFlag = flags["channel"];
+        const waitForFlag = flags["wait-for"];
+        const waitUntilFlag = flags["wait-until"];
+        const screenshotOnFailFlag = flags["screenshot-on-fail"];
+        await cmdExpect(url, {
+          ...(typeof titleFlag === "string" ? { title: titleFlag } : {}),
+          ...(typeof selectorFlag === "string"
+            ? { selector: selectorFlag }
+            : {}),
+          ...(typeof textFlag === "string" ? { text: textFlag } : {}),
+          ...(typeof statusFlag === "string"
+            ? { status: parseInt(statusFlag, 10) }
+            : {}),
+          ...(typeof timeoutFlag === "string"
+            ? { timeout: parseInt(timeoutFlag, 10) }
+            : {}),
+          ...(typeof retryFlag === "string"
+            ? { retry: parseInt(retryFlag, 10) }
+            : {}),
+          ...(typeof sessionFlag === "string" ? { session: sessionFlag } : {}),
+          ...(typeof channelFlag === "string" ? { channel: channelFlag } : {}),
+          ...(typeof waitForFlag === "string" ? { waitFor: waitForFlag } : {}),
+          ...(typeof waitUntilFlag === "string"
+            ? { waitUntil: parseWaitUntil(waitUntilFlag) }
+            : {}),
+          ...(typeof screenshotOnFailFlag === "string"
+            ? { screenshotOnFail: screenshotOnFailFlag }
+            : {}),
+          headed: flags["headed"] === true,
         });
         break;
       }

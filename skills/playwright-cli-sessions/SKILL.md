@@ -59,6 +59,7 @@ playwright-cli-sessions reports --json --limit=5
 |--------|----------|------|
 | **Session management** | `list`, `save`, `restore`, `clone`, `tag`, `delete`, `probe`, `health` | Managing saved logins |
 | **Browser automation** | `screenshot`, `navigate`, `snapshot`, `exec`, `login`, `refresh` | Actually driving a browser |
+| **Shell assertions** | `expect` | Assert page properties (title/selector/text/status) and exit 0/1 |
 
 ## Session workflows
 
@@ -169,6 +170,24 @@ playwright-cli-sessions exec /tmp/script.mjs --session=gabriel-platforms
 ```
 
 Scripts can `import` anything, reference helper files, use any Playwright API.
+
+### expect — shell-native assertions
+
+For tests and sanity checks, `expect` returns exit 0/1 based on declared
+expectations — no `.mjs` file needed:
+
+```bash
+playwright-cli-sessions expect https://example.com --title="Example Domain"
+playwright-cli-sessions expect https://gh.com/settings --session=x --selector="header"
+playwright-cli-sessions expect https://api.example.com/health --status=200
+```
+
+Flags: `--title`, `--selector`, `--text`, `--status` (at least one required),
+plus `--timeout=<ms>`, `--retry=<N>`, `--screenshot-on-fail=<path>`, and all
+standard `--session / --channel / --wait-for / --wait-until / --headed` flags.
+
+On failure the command lists each unmet expectation; retry attempts are
+announced so the output is debuggable.
 
 ### login / refresh
 

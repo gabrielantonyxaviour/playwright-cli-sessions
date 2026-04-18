@@ -1,0 +1,224 @@
+/**
+ * expect <url> — assert page properties from the shell, without writing a script.
+ *
+ * Motivation:
+ *   `navigate` and `snapshot` dump raw output; the caller has to parse it and
+ *   decide pass/fail. `exec` works but requires a .mjs file for one-shot checks.
+ *   `expect` closes the gap with a declarative, exit-code-driven assertion:
+ *
+ *     playwright-cli-sessions expect https://example.com --title="Example Domain"
+ *     playwright-cli-sessions expect https://gh.com --session=x --selector="main"
+ *
+ *   Exits 0 on success, 1 on assertion failure, 2 on infrastructure error
+ *   (browser launch, navigation, missing session). Failure output lists each
+ *   expectation that was not met.
+ *
+ * Expectations (any combination):
+ *   --title=<substr>      page.title() must contain <substr>
+ *   --selector=<sel>      element matching <sel> must be visible
+ *   --text=<substr>       text <substr> must appear somewhere on the page
+ *   --status=<code>       navigation response status must equal <code>
+ *
+ * Controls:
+ *   --timeout=<ms>        max ms to wait for any single expectation (default 10000)
+ *   --retry=<N>           times to retry the whole check on failure (default 0)
+ *   --screenshot-on-fail=<path>
+ *                         save a full-page screenshot when the check ultimately fails
+ */
+
+import type { BrowserContextOptions, Response } from "playwright";
+import { launchStealthChrome, STEALTH_INIT_SCRIPT } from "../browser-launch.js";
+import { readSaved } from "../store.js";
+import type { StorageState } from "../store.js";
+import { dirname } from "node:path";
+import { mkdirSync, existsSync } from "node:fs";
+
+type PlaywrightStorageState = NonNullable<
+  BrowserContextOptions["storageState"]
+>;
+const asPlaywrightSS = (ss: StorageState): PlaywrightStorageState =>
+  ss as unknown as PlaywrightStorageState;
+
+export interface ExpectOptions {
+  title?: string;
+  selector?: string;
+  text?: string;
+  status?: number;
+  timeout?: number;
+  retry?: number;
+  session?: string;
+  channel?: string;
+  waitFor?: string;
+  waitUntil?: "load" | "domcontentloaded" | "networkidle" | "commit";
+  headed?: boolean;
+  screenshotOnFail?: string;
+}
+
+/**
+ * Run all assertions against a freshly loaded page. Returns the list of
+ * failure messages (empty on success).
+ */
+async function runOnce(
+  url: string,
+  opts: ExpectOptions,
+  storageState: StorageState | undefined,
+): Promise<{ failures: string[]; screenshotBytes?: Buffer }> {
+  const timeout = opts.timeout ?? 10000;
+  const browser = await launchStealthChrome({
+    headless: !opts.headed,
+    channel: opts.channel,
+  });
+  try {
+    const context = await browser.newContext(
+      storageState ? { storageState: asPlaywrightSS(storageState) } : {},
+    );
+    await context.addInitScript(STEALTH_INIT_SCRIPT);
+    const page = await context.newPage();
+
+    let response: Response | null;
+    try {
+      response = await page.goto(url, {
+        waitUntil: opts.waitUntil ?? "domcontentloaded",
+        timeout,
+      });
+    } catch (e) {
+      return {
+        failures: [`navigation: ${(e as Error).message.split("\n")[0]}`],
+      };
+    }
+
+    if (opts.waitFor) {
+      try {
+        await page.waitForSelector(opts.waitFor, { timeout });
+      } catch {
+        return {
+          failures: [
+            `wait-for: "${opts.waitFor}" not found within ${timeout}ms`,
+          ],
+        };
+      }
+    }
+
+    const failures: string[] = [];
+
+    if (opts.status !== undefined) {
+      const actual = response?.status();
+      if (actual !== opts.status) {
+        failures.push(
+          `status: expected ${opts.status}, got ${actual ?? "<no response>"}`,
+        );
+      }
+    }
+
+    if (opts.title !== undefined) {
+      const title = await page.title();
+      if (!title.includes(opts.title)) {
+        failures.push(
+          `title: expected to contain "${opts.title}", got "${title}"`,
+        );
+      }
+    }
+
+    if (opts.selector !== undefined) {
+      try {
+        await page
+          .locator(opts.selector)
+          .first()
+          .waitFor({ state: "visible", timeout });
+      } catch {
+        failures.push(
+          `selector: "${opts.selector}" not visible within ${timeout}ms`,
+        );
+      }
+    }
+
+    if (opts.text !== undefined) {
+      try {
+        await page
+          .getByText(opts.text, { exact: false })
+          .first()
+          .waitFor({ state: "visible", timeout });
+      } catch {
+        failures.push(`text: "${opts.text}" not found within ${timeout}ms`);
+      }
+    }
+
+    let screenshotBytes: Buffer | undefined;
+    if (failures.length > 0 && opts.screenshotOnFail) {
+      try {
+        screenshotBytes = await page.screenshot({ fullPage: true });
+      } catch {
+        // Best-effort — don't mask the assertion failure with a screenshot error.
+      }
+    }
+
+    return { failures, ...(screenshotBytes ? { screenshotBytes } : {}) };
+  } finally {
+    await browser.close();
+  }
+}
+
+export async function cmdExpect(
+  url: string,
+  opts: ExpectOptions = {},
+): Promise<void> {
+  if (
+    opts.title === undefined &&
+    opts.selector === undefined &&
+    opts.text === undefined &&
+    opts.status === undefined
+  ) {
+    throw new Error(
+      "expect requires at least one of --title, --selector, --text, or --status.",
+    );
+  }
+
+  let storageState: StorageState | undefined;
+  if (opts.session) {
+    const saved = readSaved(opts.session);
+    if (!saved) {
+      throw new Error(
+        `No saved session: "${opts.session}". Run \`playwright-cli-sessions list\` to see available sessions.`,
+      );
+    }
+    storageState = saved.storageState;
+  }
+
+  const retry = Math.max(0, opts.retry ?? 0);
+  let lastFailures: string[] = [];
+  let lastScreenshot: Buffer | undefined;
+
+  for (let attempt = 0; attempt <= retry; attempt++) {
+    const { failures, screenshotBytes } = await runOnce(
+      url,
+      opts,
+      storageState,
+    );
+    if (failures.length === 0) {
+      console.log(`✓ ${url} — all expectations passed`);
+      return;
+    }
+    lastFailures = failures;
+    lastScreenshot = screenshotBytes;
+    if (attempt < retry) {
+      const wait = 1000 * (attempt + 1);
+      console.error(
+        `  attempt ${attempt + 1}/${retry + 1} failed, retrying in ${wait}ms...`,
+      );
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+
+  console.error(`✗ ${url} — ${lastFailures.length} expectation(s) failed:`);
+  for (const f of lastFailures) console.error(`  - ${f}`);
+
+  if (opts.screenshotOnFail && lastScreenshot) {
+    const fs = await import("node:fs");
+    const dir = dirname(opts.screenshotOnFail);
+    if (dir && !existsSync(dir)) mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(opts.screenshotOnFail, lastScreenshot);
+    console.error(`  screenshot saved: ${opts.screenshotOnFail}`);
+  }
+
+  process.exit(1);
+}
