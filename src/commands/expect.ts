@@ -36,6 +36,7 @@ import { PcsError } from "../errors.js";
 import { checkAuthWall } from "../auth-wall.js";
 import { checkHttpError } from "../http-guard.js";
 import { checkSessionFreshness } from "../session-use.js";
+import { captureScreenshot } from "../screenshot-guard.js";
 import { dirname } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
 
@@ -62,6 +63,8 @@ export interface ExpectOptions {
   screenshotOnFail?: string;
   noProbe?: boolean;
   allowHttpError?: boolean;
+  maxDimension?: number;
+  noDownscale?: boolean;
 }
 
 /**
@@ -210,7 +213,11 @@ async function runOnce(
     let screenshotBytes: Buffer | undefined;
     if (failures.length > 0 && opts.screenshotOnFail) {
       try {
-        screenshotBytes = await page.screenshot({ fullPage: true });
+        screenshotBytes = await captureScreenshot(page, {
+          fullPage: true,
+          maxDimension: opts.maxDimension,
+          noDownscale: opts.noDownscale,
+        });
       } catch {
         // Best-effort — don't mask the assertion failure with a screenshot error.
       }

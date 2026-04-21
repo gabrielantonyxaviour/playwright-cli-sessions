@@ -23,6 +23,7 @@ import { checkAuthWall } from "../auth-wall.js";
 import { checkHttpError } from "../http-guard.js";
 import { applyWaits } from "../wait-orchestrator.js";
 import { checkSessionFreshness } from "../session-use.js";
+import { captureScreenshot } from "../screenshot-guard.js";
 
 // Our StorageState has `sameSite: string` but Playwright expects the union type.
 // The data is wire-compatible; use this cast helper to bridge the gap.
@@ -44,6 +45,8 @@ export interface ScreenshotOptions {
   fullPage?: boolean;
   noProbe?: boolean;
   allowHttpError?: boolean;
+  maxDimension?: number;
+  noDownscale?: boolean;
 }
 
 export async function cmdScreenshot(
@@ -103,9 +106,11 @@ export async function cmdScreenshot(
         allowHttpError: opts.allowHttpError,
       });
       await applyWaits(page, opts);
-      await page.screenshot({
+      await captureScreenshot(page, {
         path: outPath,
         fullPage: opts.fullPage === true,
+        maxDimension: opts.maxDimension,
+        noDownscale: opts.noDownscale,
       });
       const title = await page.title();
       console.log(`✓ Screenshot saved to ${outPath}`);

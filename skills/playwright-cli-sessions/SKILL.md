@@ -212,6 +212,14 @@ playwright-cli-sessions screenshot <url> [--out=<path>] [--full-page]
 `--out` defaults to `/tmp/screenshot-<ts>.png`. Always pair with
 `--wait-for=<selector>` to avoid blank captures on JS-heavy pages.
 
+**AI-safe dimensions (v0.4.3+):** captures are downscaled to fit within
+2000×2000 by default — Anthropic's image API rejects anything larger in
+many-image requests, and stealth DPR-2 captures on macOS hit that limit
+without this guard. A stderr line (`ℹ Downscaled screenshot 1440×9940 →
+289×2000 …`) prints when a resize happens. Override per-call with
+`--no-downscale` (full resolution) or `--max-dimension=<N>` (custom cap).
+Global: `PLAYWRIGHT_CLI_NO_DOWNSCALE=1`, `PLAYWRIGHT_CLI_MAX_DIMENSION=<N>`.
+
 ### navigate
 
 ```bash

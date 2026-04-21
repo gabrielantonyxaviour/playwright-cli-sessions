@@ -95,6 +95,8 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "full-page",
     "no-probe",
     "allow-http-error",
+    "max-dimension",
+    "no-downscale",
   ],
   navigate: [
     "session",
@@ -154,6 +156,8 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "headed",
     "no-probe",
     "allow-http-error",
+    "max-dimension",
+    "no-downscale",
   ],
   report: ["context", "no-notify"],
   reports: ["limit", "json"],
@@ -209,6 +213,21 @@ function parseWaitUntil(
     `Invalid --wait-until="${value}". Valid values: ${VALID_WAIT_UNTIL.join(", ")}`,
     { flag: "wait-until", value },
   );
+}
+
+function parseMaxDimension(
+  value: string | boolean | undefined,
+): number | undefined {
+  if (typeof value !== "string") return undefined;
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new PcsError(
+      "PCS_INVALID_FLAG",
+      `Invalid --max-dimension="${value}". Expected a positive integer (e.g. 2000).`,
+      { flag: "max-dimension", value },
+    );
+  }
+  return n;
 }
 
 function usage(): void {
@@ -527,6 +546,8 @@ async function main(): Promise<void> {
           fullPage: flags["full-page"] === true,
           noProbe: flags["no-probe"] === true,
           allowHttpError: flags["allow-http-error"] === true,
+          maxDimension: parseMaxDimension(flags["max-dimension"]),
+          noDownscale: flags["no-downscale"] === true,
         });
         break;
       }
@@ -753,6 +774,8 @@ async function main(): Promise<void> {
           headed: flags["headed"] === true,
           noProbe: flags["no-probe"] === true,
           allowHttpError: flags["allow-http-error"] === true,
+          maxDimension: parseMaxDimension(flags["max-dimension"]),
+          noDownscale: flags["no-downscale"] === true,
         });
         break;
       }
