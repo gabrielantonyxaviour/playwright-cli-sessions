@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# tests/scenarios/stealth.sh — stealth fingerprint patch scenarios (v0.3.2).
+# tests/scenarios/stealth.sh — stealth fingerprint patch scenarios (v0.5.x).
 #
 # Verifies that createStealthContext() correctly patches the browser fingerprint:
 #   1. UA does not contain "HeadlessChrome" (default mode)
-#   2. navigator.webdriver is undefined (regression guard from v0.3.1)
+#   2. navigator.webdriver is false (rebrowser / CreepJS flag `undefined` as a tell;
+#      v0.5.0 switched to explicit `false`)
 #   3. navigator.connection.rtt is non-zero (spoofed)
 #   4. devicePixelRatio matches platform (2 on macOS, 1 elsewhere)
 #   5. Opt-out: PLAYWRIGHT_CLI_NO_STEALTH_PATCH=1 restores HeadlessChrome UA
@@ -66,9 +67,9 @@ ua_ok="$(node -e "
 " "$ua")"
 assert_eq "OK" "$ua_ok" "UA matches Chrome/<ver> pattern"
 
-# ── Case 2: navigator.webdriver is undefined ──────────────────────────────────
+# ── Case 2: navigator.webdriver is false (not undefined — rebrowser/CreepJS) ──
 wd="$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).webdriver))" "$json")"
-assert_eq "undefined" "$wd" "navigator.webdriver is undefined"
+assert_eq "false" "$wd" "navigator.webdriver is false"
 
 # ── Case 3: navigator.connection.rtt is non-zero ─────────────────────────────
 rtt_status="$(node -e "

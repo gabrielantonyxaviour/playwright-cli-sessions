@@ -40,6 +40,8 @@ export interface NavigateOptions {
   waitForCount?: string;
   noProbe?: boolean;
   allowHttpError?: boolean;
+  allowAuthWall?: boolean;
+  timeout?: number;
 }
 
 export async function cmdNavigate(
@@ -78,7 +80,7 @@ export async function cmdNavigate(
       try {
         response = await page.goto(url, {
           waitUntil: opts.waitUntil ?? "domcontentloaded",
-          timeout: 30000,
+          timeout: opts.timeout ?? 30000,
         });
       } catch (navErr) {
         throw new PcsError(
@@ -87,7 +89,9 @@ export async function cmdNavigate(
           { url },
         );
       }
-      await checkAuthWall(page, url, { session: opts.session });
+      if (!opts.allowAuthWall) {
+        await checkAuthWall(page, url, { session: opts.session });
+      }
       await checkHttpError(response, url, {
         allowHttpError: opts.allowHttpError,
       });

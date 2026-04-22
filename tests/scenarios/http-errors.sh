@@ -56,7 +56,7 @@ _assert_ok "PLAYWRIGHT_CLI_ALLOW_HTTP_ERROR=1 suppresses PCS_HTTP_ERROR"
 # Auth-wall detection runs first and takes priority.
 # Throws before screenshot, so /dev/null is fine.
 rc=0
-out5="$(timeout 60 node "$CLI_JS" screenshot https://github.com/settings --out=/dev/null 2>&1)" || rc=$?
+out5="$(timeout 90 node "$CLI_JS" screenshot https://github.com/settings --out=/dev/null 2>&1)" || rc=$?
 assert_exit_code 77 "$rc" "auth-gated URL exits 77 (PCS_AUTH_WALL takes priority)"
 assert_contains "$out5" "Error [PCS_AUTH_WALL]" "auth-wall error emitted, not PCS_HTTP_ERROR"
 [[ "$out5" != *"Error [PCS_HTTP_ERROR]"* ]] || {

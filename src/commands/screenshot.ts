@@ -45,6 +45,8 @@ export interface ScreenshotOptions {
   fullPage?: boolean;
   noProbe?: boolean;
   allowHttpError?: boolean;
+  allowAuthWall?: boolean;
+  timeout?: number;
   maxDimension?: number;
   noDownscale?: boolean;
 }
@@ -92,7 +94,7 @@ export async function cmdScreenshot(
       try {
         response = await page.goto(url, {
           waitUntil: opts.waitUntil ?? "domcontentloaded",
-          timeout: 30000,
+          timeout: opts.timeout ?? 30000,
         });
       } catch (navErr) {
         throw new PcsError(
@@ -101,7 +103,9 @@ export async function cmdScreenshot(
           { url },
         );
       }
-      await checkAuthWall(page, url, { session: opts.session });
+      if (!opts.allowAuthWall) {
+        await checkAuthWall(page, url, { session: opts.session });
+      }
       await checkHttpError(response, url, {
         allowHttpError: opts.allowHttpError,
       });

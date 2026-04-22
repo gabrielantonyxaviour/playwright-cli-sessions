@@ -95,6 +95,8 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "full-page",
     "no-probe",
     "allow-http-error",
+    "allow-auth-wall",
+    "timeout",
     "max-dimension",
     "no-downscale",
   ],
@@ -110,6 +112,8 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "wait-for-network",
     "no-probe",
     "allow-http-error",
+    "allow-auth-wall",
+    "timeout",
   ],
   snapshot: [
     "session",
@@ -122,6 +126,8 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "wait-for-network",
     "no-probe",
     "allow-http-error",
+    "allow-auth-wall",
+    "timeout",
   ],
   exec: [
     "session",
@@ -134,9 +140,11 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "wait-for-count",
     "wait-for-network",
     "no-probe",
+    "allow-auth-wall",
+    "timeout",
     "eval",
   ],
-  login: ["session", "channel"],
+  login: ["session", "channel", "url"],
   refresh: ["url", "channel"],
   expect: [
     "title",
@@ -213,6 +221,19 @@ function parseWaitUntil(
     `Invalid --wait-until="${value}". Valid values: ${VALID_WAIT_UNTIL.join(", ")}`,
     { flag: "wait-until", value },
   );
+}
+
+function parseTimeout(value: string | boolean | undefined): number | undefined {
+  if (typeof value !== "string") return undefined;
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new PcsError(
+      "PCS_INVALID_FLAG",
+      `Invalid --timeout="${value}". Expected a positive integer in milliseconds (e.g. 30000).`,
+      { flag: "timeout", value },
+    );
+  }
+  return n;
 }
 
 function parseMaxDimension(
@@ -340,7 +361,12 @@ Options for reports:
   --json              Emit a JSON array instead of human-readable output
 
 Error codes:
-  PCS_AUTH_WALL (77)        — landed on login page / CAPTCHA / Cloudflare challenge
+  PCS_AUTH_WALL (77)        — landed on login page (URL/title says /login, /signin, etc)
+  PCS_CHALLENGE_WALL (78)   — Cloudflare / Turnstile / CAPTCHA — hand off to a human,
+                              these cannot be scripted past. Run the suggested
+                              \`login --url=<url>\` to complete the challenge in a
+                              headful browser; the resulting session carries the
+                              challenge cookie and is reusable.
   PCS_AUTH_EXPIRED (77)     — saved session probe returned 401/302
   PCS_SELECTOR_TIMEOUT (10) — --wait-for selector never appeared
   PCS_NAV_FAILED (11)       — page.goto failed (DNS, net::ERR_*)
@@ -353,7 +379,8 @@ Error codes:
   PCS_UNKNOWN (1)           — anything unclassified
 
   All errors emit: Error [CODE]: message
-  Auth-wall errors additionally emit: AUTH_WALL service=... session=... url=... suggest="..."
+  Auth-wall errors additionally emit:      AUTH_WALL service=... session=... url=... suggest="..."
+  Challenge-wall errors additionally emit: CHALLENGE_WALL service=... session=... signal=... url=... suggest="..."
 
 Feedback loop:
   If the CLI does something unexpected, run
@@ -546,6 +573,8 @@ async function main(): Promise<void> {
           fullPage: flags["full-page"] === true,
           noProbe: flags["no-probe"] === true,
           allowHttpError: flags["allow-http-error"] === true,
+          allowAuthWall: flags["allow-auth-wall"] === true,
+          timeout: parseTimeout(flags["timeout"]),
           maxDimension: parseMaxDimension(flags["max-dimension"]),
           noDownscale: flags["no-downscale"] === true,
         });
@@ -580,6 +609,8 @@ async function main(): Promise<void> {
             typeof waitForCount === "string" ? waitForCount : undefined,
           noProbe: flags["no-probe"] === true,
           allowHttpError: flags["allow-http-error"] === true,
+          allowAuthWall: flags["allow-auth-wall"] === true,
+          timeout: parseTimeout(flags["timeout"]),
         });
         break;
       }
@@ -611,6 +642,8 @@ async function main(): Promise<void> {
             typeof waitForCount === "string" ? waitForCount : undefined,
           noProbe: flags["no-probe"] === true,
           allowHttpError: flags["allow-http-error"] === true,
+          allowAuthWall: flags["allow-auth-wall"] === true,
+          timeout: parseTimeout(flags["timeout"]),
         });
         break;
       }
@@ -652,23 +685,38 @@ async function main(): Promise<void> {
           waitForCount:
             typeof waitForCount === "string" ? waitForCount : undefined,
           noProbe: flags["no-probe"] === true,
+          allowAuthWall: flags["allow-auth-wall"] === true,
+          timeout: parseTimeout(flags["timeout"]),
           evalScript,
         });
         break;
       }
 
       case "login": {
-        const url = rest[0];
-        if (!url) {
+        // Dual signature:
+        //   login <url> [--session=<name>]         — classic, URL positional
+        //   login <name> --url=<url>                — name positional, URL via flag (skill-docs form)
+        const first = rest[0];
+        const urlFlag = flags["url"];
+        if (!first) {
           throw new PcsError(
             "PCS_MISSING_ARG",
-            "login requires a URL.\n  playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]",
+            "login requires a URL or a session name with --url.\n  playwright-cli-sessions login <url> [--session=<name>]\n  playwright-cli-sessions login <name> --url=<url>",
           );
         }
-        const session = flags["session"];
+        let url: string;
+        let sessionName: string | undefined;
+        if (typeof urlFlag === "string") {
+          url = urlFlag;
+          sessionName = first;
+        } else {
+          url = first;
+          const s = flags["session"];
+          sessionName = typeof s === "string" ? s : undefined;
+        }
         const channel = flags["channel"];
         await cmdLogin(url, {
-          session: typeof session === "string" ? session : undefined,
+          session: sessionName,
           channel: typeof channel === "string" ? channel : undefined,
         });
         break;
@@ -801,6 +849,34 @@ async function main(): Promise<void> {
         console.error(
           `AUTH_WALL service=${service} session=${sessionName} url=${url} suggest="${suggest}"`,
         );
+      }
+      // Challenge/CAPTCHA walls: tell the caller to hand off to a human.
+      // These pages can't be scripted past — retrying with a saved session
+      // won't help. Only completing the challenge in a headful browser does.
+      if (err.code === "PCS_CHALLENGE_WALL") {
+        const d = err.details;
+        const service = d["service"] ?? "unknown";
+        const sessionName = d["session"] ?? "none";
+        const url = d["finalUrl"] ?? "unknown";
+        const signal = d["signal"] ?? "unknown";
+        const suggest = `playwright-cli-sessions login ${
+          typeof sessionName === "string" && sessionName !== "none"
+            ? sessionName
+            : "<session>"
+        } --url=${url}`;
+        console.error(
+          `CHALLENGE_WALL service=${service} session=${sessionName} signal=${signal} url=${url} suggest="${suggest}"`,
+        );
+        console.error(
+          `  A Cloudflare / CAPTCHA challenge blocks automated access. Run the`,
+        );
+        console.error(
+          `  suggested \`login\` command in a terminal to complete it manually;`,
+        );
+        console.error(
+          `  the resulting session will carry the challenge cookie and can be`,
+        );
+        console.error(`  reused by other commands via --session=<name>.`);
       }
       console.error(`Error [${err.code}]: ${err.message}`);
       if (Object.keys(err.details).length > 0) {

@@ -49,6 +49,8 @@ export interface ExecOptions {
   waitForText?: string;
   waitForCount?: string;
   noProbe?: boolean;
+  allowAuthWall?: boolean;
+  timeout?: number;
   evalScript?: string;
 }
 
@@ -145,7 +147,7 @@ export async function cmdExec(
         try {
           await page.goto(opts.url, {
             waitUntil: opts.waitUntil ?? "domcontentloaded",
-            timeout: 30000,
+            timeout: opts.timeout ?? 30000,
           });
         } catch (navErr) {
           throw new PcsError(

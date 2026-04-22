@@ -11,7 +11,18 @@ const CAPTCHA_SELECTORS = [
   'iframe[src*="captcha"]',
   'iframe[src*="hcaptcha"]',
   'iframe[src*="recaptcha"]',
+  'iframe[src*="challenges.cloudflare.com"]',
+  'iframe[title*="Cloudflare"]',
+  'iframe[title*="Widget containing a Cloudflare security challenge"]',
+  '[class*="cf-challenge"]',
+  '[class*="cf-browser-verification"]',
+  "#cf-wrapper",
+  ".g-recaptcha",
+  ".h-captcha",
 ];
+
+const CHALLENGE_BODY_RE =
+  /verify you are human|checking your browser|needs to review the security of your connection|just a moment|please complete the security check|unusual traffic from your computer/i;
 
 const HOSTNAME_TO_SERVICE: Record<string, string> = {
   "github.com": "github",
@@ -97,7 +108,7 @@ export async function checkAuthWall(
       const bodyText = await page.evaluate(() =>
         (document.body?.innerText ?? "").toLowerCase(),
       );
-      if (bodyText.includes("verify you are human")) {
+      if (CHALLENGE_BODY_RE.test(bodyText)) {
         signal = "captcha";
       }
     }
@@ -106,9 +117,17 @@ export async function checkAuthWall(
   if (signal) {
     const service = opts.service ?? serviceFromUrl(finalUrl);
     const sessionName = opts.session ?? "none";
+    // Challenge/CAPTCHA pages are fundamentally different from plain login
+    // walls: the user cannot script past them — the challenge must be
+    // completed interactively in a headful browser. Split the error code so
+    // callers (and humans) know to hand off to `login --url=<url>` in a TTY
+    // rather than retrying with a saved session.
+    const isChallenge = signal === "challenge" || signal === "captcha";
     throw new PcsError(
-      "PCS_AUTH_WALL",
-      `Auth wall detected (${signal}) at ${finalUrl}`,
+      isChallenge ? "PCS_CHALLENGE_WALL" : "PCS_AUTH_WALL",
+      isChallenge
+        ? `Challenge wall detected (${signal}) at ${finalUrl}`
+        : `Auth wall detected (${signal}) at ${finalUrl}`,
       { finalUrl, title, signal, session: sessionName, service },
     );
   }

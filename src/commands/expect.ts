@@ -96,7 +96,7 @@ async function runOnce(
     try {
       response = await page.goto(url, {
         waitUntil: opts.waitUntil ?? "domcontentloaded",
-        timeout,
+        timeout: 30000,
       });
     } catch (e) {
       return {

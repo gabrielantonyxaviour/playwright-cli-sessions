@@ -39,6 +39,8 @@ export interface SnapshotOptions {
   waitForCount?: string;
   noProbe?: boolean;
   allowHttpError?: boolean;
+  allowAuthWall?: boolean;
+  timeout?: number;
 }
 
 export async function cmdSnapshot(
@@ -77,7 +79,7 @@ export async function cmdSnapshot(
       try {
         response = await page.goto(url, {
           waitUntil: opts.waitUntil ?? "domcontentloaded",
-          timeout: 30000,
+          timeout: opts.timeout ?? 30000,
         });
       } catch (navErr) {
         throw new PcsError(
@@ -86,7 +88,9 @@ export async function cmdSnapshot(
           { url },
         );
       }
-      await checkAuthWall(page, url, { session: opts.session });
+      if (!opts.allowAuthWall) {
+        await checkAuthWall(page, url, { session: opts.session });
+      }
       await checkHttpError(response, url, {
         allowHttpError: opts.allowHttpError,
       });
