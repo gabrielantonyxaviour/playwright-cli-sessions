@@ -1,4 +1,4 @@
-# PCS_* error codes — complete reference (v0.4.2)
+# PCS_* error codes — complete reference
 
 All errors emit `Error [CODE]: message` on stderr. Exit codes are stable across
 versions — dispatch on them in shell loops.
@@ -41,7 +41,7 @@ overwrite the stale session file.
 
 ---
 
-### `PCS_STALE_SESSION` (v0.4.1+)
+### `PCS_STALE_SESSION`
 
 **Exit:** 77  
 **Triggers:** Pre-launch staleness check — the session's last probe result was
@@ -64,7 +64,7 @@ globally.
 
 ## Navigation errors — exit 11
 
-### `PCS_HTTP_ERROR` (v0.4.2+)
+### `PCS_HTTP_ERROR`
 
 **Exit:** 11  
 **Triggers:** `page.goto()` received a 4xx or 5xx HTTP response.

@@ -1,6 +1,6 @@
 ---
 name: playwright-cli-sessions
-description: Use this skill whenever the user needs browser automation from the shell, wants to script Playwright, or asks about saved-session auth — even if they don't mention the CLI by name. Covers stateless runs, parallel execution, session reuse, exec scripts, and the full auth workflow.
+description: Use this skill whenever the user needs browser automation from the shell, wants to script Playwright, asks about saved-session auth, or is testing/debugging a web app (Next.js, React SPA, dashboards) — even if they don't mention the CLI by name. Covers stateless runs, parallel execution, session reuse, exec scripts, shell-native assertions (`expect`), screenshot capture, and the full first-time-login workflow. Trigger on phrases like "test this flow", "screenshot the dashboard", "why does this page blank", "check if the login still works", "run this against prod", or any task where a real browser is the only way to answer the question.
 ---
 
 # playwright-cli-sessions
@@ -33,8 +33,8 @@ Filing a report takes seconds. Working around the tool hides the bug, wastes
 more time, and produces unreliable output.
 
 Every report lands in `~/.playwright-sessions/.reports/` with your last ~10
-CLI invocations auto-embedded. **Proactive notification (v0.3.1+):** a macOS
-desktop notification fires when a Claude Code session files a report.
+CLI invocations auto-embedded. A macOS desktop notification fires when a
+Claude Code session files a report.
 
 ```bash
 playwright-cli-sessions reports          # list recent reports
@@ -48,6 +48,15 @@ playwright-cli-sessions reports --json --limit=5
 | **Session management** | `list`, `save`, `restore`, `clone`, `tag`, `delete`, `probe`, `health` | Managing saved logins |
 | **Browser automation** | `screenshot`, `navigate`, `snapshot`, `exec`, `login`, `refresh` | Driving a browser |
 | **Shell assertions** | `expect` | Assert page properties; exits 0/1 |
+
+## Quick reference — where to read next
+
+| You want to… | Read |
+|---|---|
+| Write an `exec` / `.mjs` script, or hit a locator/overlay/wait-strategy issue | [`references/exec-patterns.md`](references/exec-patterns.md) |
+| Decode a `PCS_*` error code / exit code | [`references/error-codes.md`](references/error-codes.md) |
+| Understand probe, cookie-expiry, and session staleness | [`references/expiry-model.md`](references/expiry-model.md) |
+| Map an MCP tool to its CLI equivalent | [`references/migrating-from-mcp.md`](references/migrating-from-mcp.md) |
 
 ## Session workflows
 
@@ -95,7 +104,7 @@ playwright-cli-sessions login <name> --url=https://service.com/login
 # Headful Chrome opens → user logs in → press Enter → state saved.
 ```
 
-**Expired logins:** if `list` shows `[DEAD, 302]`, ask the user to re-run
+**Expired logins:** if `list` shows `[DEAD, 302]`, ask the user to run
 `login` or `refresh`. Do NOT automate password entry, 2FA, CAPTCHA, WebAuthn,
 or OAuth popups — these always fail.
 
@@ -114,15 +123,6 @@ It covers the two most common silent failure modes:
 Also: wait-strategy decision table, login-flow recipe, and backgrounded-crash
 stderr guarantee.
 
-## v0.4.2 new flags
-
-`--wait-for-text="<str>"` — wait for a text substring anywhere in the body.  
-`--wait-for-count=<selector>:<N>` — wait for N elements matching a selector.  
-`--wait-for-network=idle` — alias for `--wait-until=networkidle`.  
-`--allow-http-error` — suppress `PCS_HTTP_ERROR` on 4xx/5xx responses.  
-`exec --eval='<js>'` — run a JS expression inline without a script file.  
-`exec -` — read the script from stdin.
-
 ## Headed vs headless — the CLI decides, not you
 
 | Command | Default | Rationale |
@@ -137,7 +137,7 @@ stderr guarantee.
   run `login` or `refresh`**. `--headed` cannot solve a CAPTCHA.
 - Only pass `--headed` when the human explicitly says "show me" or "let me watch".
 
-## Session staleness check (v0.4.1+)
+## Session staleness check
 
 Every `--session=<name>` command probes liveness before launching the browser
 if the last probe is more than 6 hours old. This closes the silent-corruption
@@ -156,16 +156,30 @@ Error [PCS_STALE_SESSION]: Session "<name>" probe failed (302). Last probed 8h a
 
 Opt-outs: `--no-probe` per call, `PLAYWRIGHT_CLI_NO_STALE_CHECK=1` globally.
 
-## Stealth (v0.3.2+, default since v0.4.0)
+## Stealth
 
 Defaults to real Chrome (`--channel=chrome`) and patches `HeadlessChrome` from
 the User-Agent, spoofs `navigator.connection.rtt`, and sets `devicePixelRatio`
 to match the host OS.
 
-Opt-outs: `--channel=chromium`, `PLAYWRIGHT_CLI_NO_STEALTH_PATCH=1`,
-`PLAYWRIGHT_CLI_BUNDLED=1`.
+**When stealth matters — don't opt out without reason:**
+- **Agentic auth flows** (logging into a real service on the user's behalf) — keep
+  stealth on. Cloudflare, PerimeterX, and DataDome fingerprint headless Chromium.
+- **Sites behind anti-bot WAFs** (banking, e-commerce, social) — stealth is what
+  makes `screenshot` / `navigate` return a real page instead of a challenge.
+- **Any `--session=<name>` use** — the saved cookies were obtained in a real browser;
+  replaying them through headless Chromium can trip heuristics that weren't triggered
+  at login time.
 
-## Auth-wall detection (v0.4.0+)
+**When stealth is neutral (but no harm in keeping it on):**
+- Testing your own Next.js / SPA app in CI or against localhost.
+- Hitting internal dashboards or docs sites with no bot-detection.
+- Scraping public content that doesn't gate on fingerprint.
+
+Opt-outs (use only if you have a reason): `--channel=chromium`,
+`PLAYWRIGHT_CLI_NO_STEALTH_PATCH=1`, `PLAYWRIGHT_CLI_BUNDLED=1`.
+
+## Auth-wall detection
 
 On landing at a login/CAPTCHA/Cloudflare page instead of the destination:
 **exit 77** + a grep-friendly prefix on stderr:
@@ -184,13 +198,14 @@ command — the session is missing or expired.
 |------|------|---------|
 | 77 | `PCS_AUTH_WALL` | Redirected to login — session missing or expired |
 | 77 | `PCS_STALE_SESSION` | Pre-launch probe says session is dead |
-| 11 | `PCS_HTTP_ERROR` | 4xx/5xx response on goto (v0.4.2+) |
+| 11 | `PCS_HTTP_ERROR` | 4xx/5xx response on goto |
+| 10 | `PCS_SELECTOR_TIMEOUT` | A `--wait-for*` flag did not resolve |
 
 See [`references/error-codes.md`](references/error-codes.md) for the full
 `PCS_*` table including `PCS_AUTH_EXPIRED`, `PCS_NAV_FAILED`,
-`PCS_SELECTOR_TIMEOUT`, `PCS_SESSION_NOT_FOUND`, `PCS_BROWSER_CRASH`,
-`PCS_NETWORK`, `PCS_INVALID_FLAG`, `PCS_MISSING_ARG`, `PCS_UNKNOWN` — each
-with exit code, trigger conditions, and recommended next action.
+`PCS_SESSION_NOT_FOUND`, `PCS_BROWSER_CRASH`, `PCS_NETWORK`,
+`PCS_INVALID_FLAG`, `PCS_MISSING_ARG`, `PCS_UNKNOWN` — each with exit code,
+trigger conditions, and recommended next action.
 
 Unknown flags get a Levenshtein suggestion when edit-distance ≤ 2:
 ```bash
@@ -201,7 +216,11 @@ playwright-cli-sessions screenshot https://example.com --waite-for=h1
 ## Browser automation commands
 
 All browser commands accept: `--session=<name>`, `--no-probe`, `--headed`,
-`--channel=<chrome|msedge|...>`, `--wait-for=<selector>`, `--wait-until=<load|domcontentloaded|networkidle|commit>`.
+`--channel=<chrome|msedge|chromium|...>`, `--wait-for=<selector>`,
+`--wait-for-text="<str>"`, `--wait-for-count=<selector>:<N>`,
+`--wait-until=<load|domcontentloaded|networkidle|commit>` (or
+`--wait-for-network=idle` as an alias), `--allow-http-error` (suppresses
+`PCS_HTTP_ERROR` on 4xx/5xx — use when testing error pages intentionally).
 
 ### screenshot
 
@@ -212,13 +231,13 @@ playwright-cli-sessions screenshot <url> [--out=<path>] [--full-page]
 `--out` defaults to `/tmp/screenshot-<ts>.png`. Always pair with
 `--wait-for=<selector>` to avoid blank captures on JS-heavy pages.
 
-**AI-safe dimensions (v0.4.3+):** captures are downscaled to fit within
-2000×2000 by default — Anthropic's image API rejects anything larger in
-many-image requests, and stealth DPR-2 captures on macOS hit that limit
-without this guard. A stderr line (`ℹ Downscaled screenshot 1440×9940 →
-289×2000 …`) prints when a resize happens. Override per-call with
-`--no-downscale` (full resolution) or `--max-dimension=<N>` (custom cap).
-Global: `PLAYWRIGHT_CLI_NO_DOWNSCALE=1`, `PLAYWRIGHT_CLI_MAX_DIMENSION=<N>`.
+**AI-safe dimensions (default):** captures are downscaled to fit within
+2000×2000 — Anthropic's image API rejects anything larger in many-image
+requests, and stealth DPR-2 captures on macOS hit that limit without this
+guard. A stderr line (`ℹ Downscaled screenshot 1440×9940 → 289×2000 …`)
+prints when a resize happens. Override with `--no-downscale` (full
+resolution) or `--max-dimension=<N>` (custom cap). Global env overrides:
+`PLAYWRIGHT_CLI_NO_DOWNSCALE=1`, `PLAYWRIGHT_CLI_MAX_DIMENSION=<N>`.
 
 ### navigate
 
@@ -251,6 +270,16 @@ export async function run({ page, context, browser }) {
 ```bash
 playwright-cli-sessions exec /tmp/script.mjs --session=gabriel-platforms
 # Prints JSON of the return value. Throw to exit non-zero.
+```
+
+**Inline and stdin variants:**
+
+```bash
+# One-liner without a file
+playwright-cli-sessions exec --eval='await page.goto("https://example.com"); return await page.title();'
+
+# Read the script from stdin
+cat script.mjs | playwright-cli-sessions exec -
 ```
 
 Scripts can `import` anything, use any Playwright API. For tactical patterns
@@ -309,19 +338,17 @@ wait
 
 ## Rules recap
 
-- **Never launch a browser just to test with auth** — pass `--session=<name>`
-- **Always `list` first** to pick a session with live auth for the target service
-- **`--wait-for=<selector>` on every screenshot/nav** — avoids blank captures
-- **Prefer `exec` with a `.mjs` script** over chaining many `navigate` commands
-- **On unexpected behavior: `report`, don't work around** — see top of this file
-- **Default headless; never pass `--headed` unprompted**
-- Saved sessions are read-only from CLI — safe for parallel use
-- Expired logins: ask the user to `login` / `refresh`, don't automate creds
-- **Before writing an exec script:** read `references/exec-patterns.md`
+- **Never launch a browser just to test with auth** — pass `--session=<name>`.
+- **On unexpected behavior: `report`, don't work around.** See top of file.
+- **Default headless; never pass `--headed` unprompted.**
+- **Always pair screenshots/navs with `--wait-for=<selector>`** to avoid blank captures.
+- **Expired logins are the user's problem to solve** — ask for `login` / `refresh`;
+  never automate credentials, 2FA, or CAPTCHA.
 
 ## Interoperability with playwright-sessions MCP
 
 Both tools share `~/.playwright-sessions/`. Sessions saved by one are visible
 to the other. The probe cache (`.probe-cache.json`) is also shared.
 
-See `references/migrating-from-mcp.md` for the MCP tool → CLI command mapping.
+See [`references/migrating-from-mcp.md`](references/migrating-from-mcp.md) for
+the MCP tool → CLI command mapping.

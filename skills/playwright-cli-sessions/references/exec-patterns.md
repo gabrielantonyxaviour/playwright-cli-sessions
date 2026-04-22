@@ -5,6 +5,15 @@ If you are about to write a browser automation script, read this first —
 especially sections 1 and 2. These cover the two most common sources of
 unexpected failures in the wild.
 
+## Contents
+
+1. [Locator discipline — strict mode](#1-locator-discipline--strict-mode) — `getByRole('Sign In')` matching two buttons
+2. [Modal overlays that intercept clicks](#2-modal-overlays-that-intercept-clicks) — `subtree intercepts pointer events`
+3. [Wait strategies — decision table](#3-wait-strategies--decision-table) — picking `--wait-for` vs `--wait-for-text` vs `networkidle`
+4. [Login flows inside `exec`](#4-login-flows-inside-exec) — scripted credentials (use sparingly)
+5. [Background execution and error delivery](#5-background-execution-and-error-delivery) — stderr guarantees under `&`
+6. [Selectors inside `evaluate` — vanilla DOM fallback](#6-selectors-inside-evaluate--vanilla-dom-fallback) — last-resort DOM queries
+
 ---
 
 ## 1. Locator discipline — strict mode
@@ -153,7 +162,7 @@ Every fresh navigation can leave you with blank screenshots or stale DOM if
 content loads asynchronously. Choose the wait that matches what you're
 actually waiting for:
 
-| Need | v0.4.2+ flag | Playwright API equivalent |
+| Need | CLI flag | Playwright API equivalent |
 |------|-------------|--------------------------|
 | A specific element to appear | `--wait-for=<selector>` | `page.waitForSelector(sel)` |
 | A text string anywhere on the page | `--wait-for-text="<str>"` | `page.waitForFunction(() => document.body.innerText.includes('...'))` |
@@ -246,9 +255,8 @@ out of your scripts.
 
 `playwright-cli-sessions` guarantees that a crashing `exec` run delivers its
 error on stderr with a non-zero exit code, even when backgrounded with `&` and
-stdout/stderr are redirected to files. The silent-crash behavior (where errors
-vanished in background processes) was fixed in v0.4.0 when the `PcsError`
-taxonomy was introduced.
+stdout/stderr are redirected to files. Errors are classified into the
+`PcsError` taxonomy (see `references/error-codes.md`).
 
 **Expected shape on a thrown error:**
 
