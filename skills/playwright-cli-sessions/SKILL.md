@@ -5,10 +5,126 @@ description: Use this skill whenever the user needs browser automation from the 
 
 # playwright-cli-sessions
 
-A stateless shell CLI on top of Playwright. Each invocation launches a browser,
-does its work, exits. No persistent server, no stdio — true parallelism via
-shell `&`. Reads/writes `~/.playwright-sessions/`, interoperable with the
-`playwright-sessions` MCP.
+A shell CLI on top of Playwright. Attached-browser mode (v0.7.0+) keeps one
+real Chrome running; every command opens a background tab in it and closes
+that tab when done. Reads/writes `~/.playwright-sessions/`.
+
+---
+
+## ⚑ OPERATING POSTURE — read this first, every session
+
+**You are the one using the browser. The user is not.** This CLI exists
+specifically so you (the agent) can do browser work without the user lifting
+a finger. When a task needs a browser, you open the CLI and drive it. You
+never, under any circumstance, say any of these things:
+
+- "Can you open X in your browser?"
+- "Please log into Y and come back."
+- "Go to <url> and do Z."
+- "You'll need to click the verification link Google just sent you."
+- "Sign in to the browser I opened for you." *(see "only legit hand-off" below)*
+
+The user has deliberately given you full access — attached Chrome,
+Gmail MCP for OTPs and verification emails, vault for credentials, keychain
+integration. Use that access. Treat any ask to the user as a failure of
+your own execution unless it falls in the single legit hand-off below.
+
+### Session boot-up ritual (do this first, every fresh session that touches a browser)
+
+```bash
+# 1. Is a Chrome already attached from a previous session?
+playwright-cli-sessions browser status
+
+# 2. If not, start one. This is ONE-TIME per day — no per-command window pops.
+playwright-cli-sessions browser start
+```
+
+From here, every `screenshot` / `navigate` / `snapshot` / `exec` / `expect` /
+`login` auto-attaches to that Chrome. No further setup.
+
+### Remote worker routing (Tailscale → M2 worker)
+
+When `PLAYWRIGHT_CLI_REMOTE=m2worker` is set, `browser start` SSHes to the
+worker Mac, starts Chrome *there*, and forwards the remote CDP port back via
+SSH tunnel. Every CLI command then drives the remote Chrome transparently
+(no code or flag changes on the command side — `screenshot`, `navigate`,
+etc. just work against the tunneled local port).
+
+```bash
+# Route all browser work to the M2 worker (headless; its screen IS the display for headful)
+PLAYWRIGHT_CLI_REMOTE=m2worker playwright-cli-sessions browser start --headless
+playwright-cli-sessions screenshot https://example.com --out=/tmp/x.png
+playwright-cli-sessions browser stop    # stops remote Chrome + local tunnel
+```
+
+**Decision policy for agent sessions:** check `tailscale status` for the
+worker host first. If reachable, export `PLAYWRIGHT_CLI_REMOTE=m2worker`
+before `browser start` — all browser work offloads to the worker and never
+pops a window on the local Mac. If the worker is unreachable, fall back
+to local Chrome (unset the env var).
+
+### Auto-login playbook — Gmail OTP / magic link (the happy path)
+
+For services that use OTP codes or magic links (Vercel, Supabase, Notion, most
+modern SaaS), follow this playbook end-to-end — all steps are yours:
+
+```bash
+# 1. Open the login page in the attached Chrome
+playwright-cli-sessions navigate https://service.com/login
+
+# 2. Fill the email field + submit (use exec with the user's known email)
+playwright-cli-sessions exec --eval='
+  await page.goto("https://service.com/login");
+  await page.getByLabel("Email").fill("gabrielantony56@gmail.com");
+  await page.getByRole("button", { name: /sign in|continue|send/i }).click();
+'
+
+# 3. Poll Gmail for the OTP / link — use the Gmail MCP tools that are
+#    already configured in your session (mcp__claude_ai_Gmail__*). Search
+#    for recent messages from the service; extract the code or click-through
+#    URL from the body.
+
+# 4. Enter the code back on the page (exec), OR navigate to the magic link.
+playwright-cli-sessions exec --eval='
+  await page.getByLabel("Verification code").fill("123456");
+  await page.getByRole("button", { name: /verify|submit/i }).click();
+'
+
+# 5. Done. Cookies persist in the attached Chrome profile automatically —
+#    next session reuses them without re-logging.
+```
+
+**Email to use:** `gabrielantony56@gmail.com` (confirmed from user memory).
+**Gmail MCP tools in your session:** `mcp__claude_ai_Gmail__gmail_search_messages`,
+`mcp__claude_ai_Gmail__gmail_read_message`, `mcp__claude_ai_Gmail__gmail_read_thread`.
+If they are listed as "disconnected" in the current tool environment, say
+so and ask the user to reconnect — but only as a last resort, and only
+after confirming the CLI and attached Chrome itself work.
+
+### Account creation — also yours
+
+Signup forms: fill every field (exec + page.getByLabel). For email
+verification, same Gmail-OTP playbook. If a form demands a password, use
+a strong random one and save it with the session name to vault via
+`~/.claude/vault/inject.sh` — you own the full account-creation lifecycle.
+
+### The ONLY legitimate hand-off: CAPTCHAs you genuinely cannot solve
+
+hCaptcha image grids, reCAPTCHA checkboxes that need mouse wiggle,
+Cloudflare Turnstile that demands behavioral signals. The CLI detects these
+and exits with `PCS_CHALLENGE_WALL` (exit 78). In this and ONLY this case:
+
+- The Chrome window is already open (you opened it). The challenge is
+  visible in it.
+- Tell the user: "There's a CAPTCHA on the Chrome window I have open —
+  can you click through it? I'll resume automatically."
+- Resume the flow once they're past it.
+
+Not a legit hand-off: "please open a browser" (you already did), "please
+go to this URL" (you already navigated), "please sign in" (you have Gmail
+OTPs for that), "please check your email" (you have Gmail MCP for that).
+
+---
 
 ## THE CRITICAL RULE — Feedback Loop
 

@@ -35,13 +35,34 @@ import { SESSION_STORE_ROOT, ensureRoot } from "./store.js";
 const STATE_FILE = join(SESSION_STORE_ROOT, ".attached-browser.json");
 const PROFILE_DIR = join(SESSION_STORE_ROOT, ".chrome-profile");
 
-export interface AttachedState {
+export interface AttachedRemoteInfo {
+  /** SSH host alias or hostname (e.g. "m2worker"). */
+  host: string;
+  /** Chrome CDP port on the remote side. */
+  port: number;
+  /** Chrome PID on the remote side (best-effort, for status). */
   pid: number;
+}
+
+export interface AttachedState {
+  /**
+   * Local PID. For local mode, this is Chrome itself. For remote mode, this
+   * is the local SSH-tunnel process. Either way, stopping it is the first
+   * step of `browser stop`.
+   */
+  pid: number;
+  /**
+   * Port the CDP client connects to on `127.0.0.1`. For local mode it's
+   * Chrome's `--remote-debugging-port`. For remote mode it's the local side
+   * of the SSH tunnel forwarding to the remote Chrome.
+   */
   port: number;
   userDataDir: string;
   channel: string;
   headless: boolean;
   startedAt: string;
+  /** Present only in remote mode. Identifies the remote Chrome + SSH target. */
+  remote?: AttachedRemoteInfo;
 }
 
 function readState(): AttachedState | null {
@@ -122,6 +143,42 @@ function findChromeBinary(channel: string): string {
   );
 }
 
+/** Derive the .app bundle path from the binary path (macOS only). */
+function binaryToAppBundle(binary: string): string | null {
+  const m = binary.match(/^(.*\.app)\/Contents\/MacOS\//);
+  return m ? m[1]! : null;
+}
+
+/**
+ * Find the main Chrome browser PID whose cmdline contains `--remote-debugging-port=<port>`.
+ * Filters out `--type=` helper/renderer processes. Polls for up to `timeoutMs`.
+ */
+async function findChromePidByPort(
+  port: number,
+  timeoutMs = 5000,
+): Promise<number | null> {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const execFileP = promisify(execFile);
+  const marker = `--remote-debugging-port=${port}`;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const { stdout } = await execFileP("ps", ["-axo", "pid=,command="]);
+      for (const line of stdout.split("\n")) {
+        if (!line.includes(marker)) continue;
+        if (line.includes("--type=")) continue; // helper/renderer
+        const m = line.match(/^\s*(\d+)\s+/);
+        if (m) return Number(m[1]);
+      }
+    } catch {
+      // ignore and retry
+    }
+    await sleep(100);
+  }
+  return null;
+}
+
 /** Public: is an attached Chrome currently registered AND alive AND listening? */
 export async function isAttached(): Promise<boolean> {
   const state = readState();
@@ -169,6 +226,12 @@ const STEALTH_LAUNCH_ARGS = [
 /**
  * Start a persistent Chrome subprocess with CDP enabled. If already running,
  * returns the existing state without re-launching. Returns the live state.
+ *
+ * Remote routing: when `PLAYWRIGHT_CLI_REMOTE=<ssh-host>` is set (e.g.
+ * `m2worker`), we SSH to that host, start Chrome there, and forward its CDP
+ * port back via an SSH tunnel. The returned state includes a `remote` field
+ * recording the host + remote port so `stopAttached` can tear it down
+ * symmetrically.
  */
 export async function startAttached(
   opts: StartOpts = {},
@@ -183,6 +246,15 @@ export async function startAttached(
   }
   // Stale state from a dead prior run — clear before starting fresh.
   if (existing) clearState();
+
+  const remoteHost = process.env.PLAYWRIGHT_CLI_REMOTE;
+  if (remoteHost && remoteHost.length > 0) {
+    const { startAttachedRemote } =
+      await import("./attached-browser-remote.js");
+    const state = await startAttachedRemote(remoteHost, opts);
+    writeState(state);
+    return state;
+  }
 
   mkdirSync(PROFILE_DIR, { recursive: true });
   const port = await findFreePort();
@@ -201,11 +273,39 @@ export async function startAttached(
   ];
   if (opts.headless === true) args.push("--headless=new");
 
-  const child = spawn(chromeBin, args, {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
+  // macOS: launch via `open -n -a <App> --args ...` so the new Chrome is
+  // registered with LaunchServices. Direct-binary spawn leaves the window
+  // unregistered with the window server — CDP works but no visible UI.
+  // `open` exits immediately after launching; we find the real Chrome PID
+  // by scanning ps for our unique --remote-debugging-port.
+  //
+  // Headless mode (--headless=new) still goes through open -n -a — no UI is
+  // expected, and the process tracking via port still works.
+  let launchedPid: number | undefined;
+  if (process.platform === "darwin") {
+    const appBundle = binaryToAppBundle(chromeBin);
+    if (!appBundle) {
+      throw new Error(
+        `Could not derive .app bundle from Chrome binary path: ${chromeBin}`,
+      );
+    }
+    const openChild = spawn(
+      "open",
+      ["-n", "-a", appBundle, "--args", ...args],
+      {
+        stdio: "ignore",
+      },
+    );
+    // Wait for `open` to finish (it exits quickly after handing off to LaunchServices).
+    await new Promise<void>((resolve) => openChild.on("exit", () => resolve()));
+  } else {
+    const child = spawn(chromeBin, args, {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+    launchedPid = child.pid;
+  }
 
   // Wait up to 10s for the CDP port to come up.
   let ready = false;
@@ -217,18 +317,34 @@ export async function startAttached(
     await sleep(100);
   }
   if (!ready) {
-    try {
-      if (typeof child.pid === "number") process.kill(child.pid, "SIGTERM");
-    } catch {
-      // ignore
+    if (launchedPid !== undefined) {
+      try {
+        process.kill(launchedPid, "SIGTERM");
+      } catch {
+        // ignore
+      }
     }
     throw new Error(
       `Chrome started but CDP on port ${port} never became responsive.`,
     );
   }
 
+  // On darwin we need to resolve the actual Chrome PID (not the `open` PID).
+  // On other platforms, child.pid is the Chrome PID directly.
+  let pid = launchedPid;
+  if (process.platform === "darwin") {
+    const found = await findChromePidByPort(port);
+    if (!found) {
+      throw new Error(
+        `Chrome CDP is up on ${port} but could not locate the browser PID. ` +
+          `Profile: ${PROFILE_DIR}`,
+      );
+    }
+    pid = found;
+  }
+
   const state: AttachedState = {
-    pid: child.pid!,
+    pid: pid!,
     port,
     userDataDir: PROFILE_DIR,
     channel,
@@ -243,6 +359,15 @@ export async function startAttached(
 export async function stopAttached(): Promise<boolean> {
   const state = readState();
   if (!state) return false;
+
+  // Remote mode: stop the remote Chrome via SSH, then kill the local tunnel.
+  if (state.remote) {
+    const wasAlive = isPidAlive(state.pid);
+    const { stopAttachedRemote } = await import("./attached-browser-remote.js");
+    await stopAttachedRemote(state);
+    clearState();
+    return wasAlive;
+  }
 
   let wasAlive = isPidAlive(state.pid);
   if (wasAlive) {

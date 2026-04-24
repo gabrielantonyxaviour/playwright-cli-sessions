@@ -52,12 +52,20 @@ async function doStart(opts: BrowserOptions): Promise<void> {
     channel: opts.channel,
   });
   const mode = state.headless ? "headless" : "headful";
+  const where = state.remote
+    ? ` via SSH tunnel → ${state.remote.host}:${state.remote.port}`
+    : "";
   process.stdout.write(
-    `✓ Attached Chrome started (${mode} ${state.channel})\n` +
-      `  pid:      ${state.pid}\n` +
-      `  port:     ${state.port}\n` +
-      `  profile:  ${state.userDataDir}\n` +
-      `  started:  ${state.startedAt}\n` +
+    `✓ Attached Chrome started (${mode} ${state.channel})${where}\n` +
+      `  local pid:  ${state.pid}${state.remote ? "  (ssh tunnel)" : "  (chrome)"}\n` +
+      `  local port: ${state.port}\n` +
+      `  profile:    ${state.userDataDir}\n` +
+      `  started:    ${state.startedAt}\n` +
+      (state.remote
+        ? `  remote host: ${state.remote.host}\n` +
+          `  remote pid:  ${state.remote.pid}\n` +
+          `  remote port: ${state.remote.port}\n`
+        : "") +
       `\n` +
       `Subsequent browser commands will attach to this Chrome automatically.\n` +
       `Run \`playwright-cli-sessions browser stop\` when you're done for the day.\n`,
@@ -90,12 +98,20 @@ async function doStatus(opts: BrowserOptions): Promise<void> {
 
   const mode = state.headless ? "headless" : "headful";
   const status = running ? "running" : "DEAD";
+  const where = state.remote
+    ? ` via SSH tunnel → ${state.remote.host}:${state.remote.port}`
+    : "";
   process.stdout.write(
-    `Attached Chrome: ${status} (${mode} ${state.channel})\n` +
-      `  pid:      ${state.pid}\n` +
-      `  port:     ${state.port}\n` +
-      `  profile:  ${state.userDataDir}\n` +
-      `  started:  ${state.startedAt}\n`,
+    `Attached Chrome: ${status} (${mode} ${state.channel})${where}\n` +
+      `  local pid:  ${state.pid}${state.remote ? "  (ssh tunnel)" : "  (chrome)"}\n` +
+      `  local port: ${state.port}\n` +
+      `  profile:    ${state.userDataDir}\n` +
+      `  started:    ${state.startedAt}\n` +
+      (state.remote
+        ? `  remote host: ${state.remote.host}\n` +
+          `  remote pid:  ${state.remote.pid}  (chrome on ${state.remote.host})\n` +
+          `  remote port: ${state.remote.port}\n`
+        : ""),
   );
 
   if (!running) {
