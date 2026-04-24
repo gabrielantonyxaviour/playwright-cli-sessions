@@ -295,7 +295,7 @@ Usage:
   playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]
   playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]
   playwright-cli-sessions expect <url> [--title=<substr>] [--selector=<sel>] [--text=<substr>] [--status=<code>] [--session=<name>] [--timeout=<ms>] [--retry=<N>] [--screenshot-on-fail=<path>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
-  playwright-cli-sessions browser <start|stop|status> [--channel=<chrome|msedge>] [--json]
+  playwright-cli-sessions browser <start|stop|status|import-sessions> [--channel=<chrome|msedge>] [--json]
   playwright-cli-sessions report "<message>" [--context=<N>] [--no-notify]
   playwright-cli-sessions reports [--limit=<N>] [--json]
 
@@ -316,7 +316,7 @@ Commands:
   login       Open a visible browser for interactive login and save the session
   refresh     Re-open an existing session to re-authenticate and update it
   expect      Assert page properties (title/selector/text/status) from the shell — exits 0/1
-  browser     Manage the persistent attached Chrome (start | stop | status)
+  browser     Manage the persistent attached Chrome (start | stop | status | import-sessions)
   report      File a structured issue report about unexpected CLI behavior
   reports     List recently filed reports
 
@@ -866,7 +866,7 @@ async function main(): Promise<void> {
         if (!sub) {
           throw new PcsError(
             "PCS_MISSING_ARG",
-            `browser requires a subcommand.\n  playwright-cli-sessions browser <start|stop|status> [--channel=<chrome|msedge>] [--json]`,
+            `browser requires a subcommand.\n  playwright-cli-sessions browser <start|stop|status|import-sessions> [--channel=<chrome|msedge>] [--json]`,
           );
         }
         const channelFlag = flags["channel"];

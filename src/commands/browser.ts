@@ -16,8 +16,10 @@ import {
   getStatus,
   startAttached,
   stopAttached,
+  tryAttach,
   type AttachedState,
 } from "../attached-browser.js";
+import { listSavedNames, readSaved } from "../store.js";
 import { PcsError } from "../errors.js";
 
 export interface BrowserOptions {
@@ -36,12 +38,164 @@ export async function cmdBrowser(
       return doStop();
     case "status":
       return doStatus(opts);
+    case "import-sessions":
+      return doImportSessions();
     default:
       throw new PcsError(
         "PCS_INVALID_INPUT",
-        `Unknown browser subcommand "${sub}". Expected: start | stop | status`,
+        `Unknown browser subcommand "${sub}". Expected: start | stop | status | import-sessions`,
         { subcommand: sub },
       );
+  }
+}
+
+/**
+ * Inject cookies from every saved storageState JSON into the attached
+ * browser's persistent profile context. Lets the user avoid re-authenticating
+ * each service in the attached Chrome window by reusing credentials already
+ * captured via `login <name>` into the session JSON files.
+ *
+ * Cookies and localStorage (origins) are both imported when present. Merge
+ * is "last one wins" — if two sessions hold different cookies for the same
+ * (name, domain, path), the session read last overwrites. For a single user
+ * with distinct services per session that rarely happens; if it does, delete
+ * the redundant session first.
+ */
+async function doImportSessions(): Promise<void> {
+  const browser = await tryAttach();
+  if (!browser) {
+    throw new PcsError(
+      "PCS_INVALID_INPUT",
+      `No attached Chrome is running. Start one first:\n` +
+        `  playwright-cli-sessions browser start\n` +
+        `\n` +
+        `Import writes cookies + localStorage directly into the attached\n` +
+        `Chrome's persistent profile via CDP. It cannot run standalone.`,
+    );
+  }
+
+  const contexts = browser.contexts();
+  const context = contexts[0];
+  if (!context) {
+    try {
+      await browser.close();
+    } catch {
+      // ignore
+    }
+    throw new PcsError(
+      "PCS_UNKNOWN",
+      "Attached Chrome has no default context to import into.",
+    );
+  }
+
+  // Drop the initial connection — we re-attach per session so a transient
+  // CDP hiccup on one session doesn't wedge the rest.
+  try {
+    await browser.close();
+  } catch {
+    // ignore
+  }
+
+  const names = listSavedNames();
+  if (names.length === 0) {
+    process.stdout.write("No saved sessions found. Nothing to import.\n");
+    return;
+  }
+
+  process.stdout.write(
+    `Importing ${names.length} saved sessions into attached Chrome profile (one at a time, with pauses)...\n\n`,
+  );
+
+  let totalCookies = 0;
+  let successCount = 0;
+  const failures: Array<{ name: string; error: string }> = [];
+
+  const { setTimeout: sleep } = await import("node:timers/promises");
+
+  for (const name of names) {
+    const saved = readSaved(name);
+    if (!saved) {
+      failures.push({ name, error: "could not read session file" });
+      process.stdout.write(`  ✗ ${name}: could not read session file\n`);
+      continue;
+    }
+    const ss = saved.storageState;
+    if (!ss || typeof ss !== "object") {
+      failures.push({ name, error: "no storageState in session" });
+      process.stdout.write(`  ✗ ${name}: no storageState in session\n`);
+      continue;
+    }
+    const cookies = Array.isArray(ss.cookies) ? ss.cookies : [];
+    const origins = Array.isArray(ss.origins) ? ss.origins : [];
+    if (cookies.length === 0) {
+      process.stdout.write(`  · ${name}: empty (no cookies) — skipped\n`);
+      continue;
+    }
+
+    // Fresh CDP connection per session. If any connection drops or the
+    // context gets into a weird state, the NEXT session gets a clean one.
+    let perSessionBrowser: Awaited<ReturnType<typeof tryAttach>> | null = null;
+    try {
+      perSessionBrowser = await tryAttach();
+      if (!perSessionBrowser) {
+        failures.push({ name, error: "could not re-attach between sessions" });
+        process.stdout.write(
+          `  ✗ ${name}: could not re-attach between sessions\n`,
+        );
+        continue;
+      }
+      const ctx = perSessionBrowser.contexts()[0];
+      if (!ctx) {
+        failures.push({ name, error: "no default context" });
+        process.stdout.write(`  ✗ ${name}: no default context\n`);
+        continue;
+      }
+
+      // storageState Cookie schema is wire-compatible with Playwright's
+      // addCookies; cast through unknown to bridge the sameSite nominal type.
+      await ctx.addCookies(
+        cookies as unknown as Parameters<typeof ctx.addCookies>[0],
+      );
+      totalCookies += cookies.length;
+      successCount += 1;
+
+      const parts: string[] = [`${cookies.length} cookies`];
+      if (origins.length > 0) {
+        parts.push(`${origins.length} localStorage origins skipped`);
+      }
+      process.stdout.write(`  ✓ ${name}: ${parts.join(", ")}\n`);
+    } catch (err) {
+      failures.push({ name, error: (err as Error).message.split("\n")[0] });
+      process.stdout.write(
+        `  ✗ ${name}: ${(err as Error).message.split("\n")[0]}\n`,
+      );
+    } finally {
+      if (perSessionBrowser) {
+        try {
+          await perSessionBrowser.close();
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    // Small breather between sessions. Keeps CDP from getting overwhelmed on
+    // the tunneled remote path and lets Chrome flush cookie DB writes.
+    await sleep(250);
+  }
+
+  process.stdout.write(
+    `\n` +
+      `Imported from ${successCount}/${names.length} sessions:\n` +
+      `  cookies added:  ${totalCookies}\n`,
+  );
+  if (failures.length > 0) {
+    process.stdout.write(`  failures:       ${failures.length}\n`);
+    process.stdout.write(
+      `\nNote: some sessions may have been logged out or banned server-side\n` +
+        `already — the cookies are still imported, but won't grant access until\n` +
+        `you run \`login <name>\` again to refresh them.\n`,
+    );
   }
 }
 

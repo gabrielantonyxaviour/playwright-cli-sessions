@@ -128,8 +128,12 @@ async function remoteBrowserStart(
   });
   const combined = stdout + "\n" + stderr;
 
-  const portMatch = combined.match(/^\s*port:\s+(\d+)/m);
-  const pidMatch = combined.match(/^\s*pid:\s+(\d+)/m);
+  // Output format (as of v0.8.0): "  local pid: N  (chrome)" and
+  // "  local port: N". Match the `local ` prefix explicitly so we don't
+  // pick up the remote-block fields if this is ever run against a chained
+  // remote-of-a-remote setup.
+  const portMatch = combined.match(/^\s*local port:\s+(\d+)/m);
+  const pidMatch = combined.match(/^\s*local pid:\s+(\d+)/m);
   if (!portMatch || !pidMatch) {
     throw new Error(
       `Could not parse 'browser start' output from ${host}. Output:\n${combined}`,
