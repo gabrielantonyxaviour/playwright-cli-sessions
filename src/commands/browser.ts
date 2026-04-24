@@ -21,7 +21,6 @@ import {
 import { PcsError } from "../errors.js";
 
 export interface BrowserOptions {
-  headless?: boolean;
   channel?: string;
   json?: boolean;
 }
@@ -47,8 +46,14 @@ export async function cmdBrowser(
 }
 
 async function doStart(opts: BrowserOptions): Promise<void> {
+  // Attached mode is always headful — no --headless flag. The whole point of
+  // the attached Chrome is a persistent, visible, real profile (Google trusts
+  // it, you can log in, you can see what's happening). Headless defeats that.
+  // Scenario harness only: PLAYWRIGHT_CLI_HEADLESS=1 env is honored as an
+  // internal back-door so `tests/run.sh` doesn't pop windows during tests.
+  const headless = process.env.PLAYWRIGHT_CLI_HEADLESS === "1";
   const state = await startAttached({
-    headless: opts.headless === true,
+    headless,
     channel: opts.channel,
   });
   const mode = state.headless ? "headless" : "headful";

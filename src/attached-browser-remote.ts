@@ -110,8 +110,13 @@ async function remoteBrowserStart(
   host: string,
   opts: StartOpts,
 ): Promise<{ port: number; pid: number }> {
+  // Remote attached Chrome is ALWAYS headful (v0.8.1+). The remote Mac's
+  // screen IS the display; the whole point of the worker is that it shows a
+  // visible, persistent, trusted Chrome that real sites treat as a normal
+  // daily-driver browser. We never pass --headless here, regardless of
+  // local opts.headless (which is only honored for the local-launch fallback
+  // path via PLAYWRIGHT_CLI_HEADLESS env, and only for the scenario harness).
   const flags: string[] = [];
-  if (opts.headless === true) flags.push("--headless");
   if (opts.channel) flags.push(`--channel=${opts.channel}`);
 
   // Call the remote's installed CLI via npx @latest, ensuring we pick up

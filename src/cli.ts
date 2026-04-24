@@ -175,7 +175,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   ],
   report: ["context", "no-notify"],
   reports: ["limit", "json"],
-  browser: ["headless", "channel", "json"],
+  browser: ["channel", "json"],
 };
 
 /** Return the closest known flag if within edit-distance 2, else undefined. */
@@ -295,7 +295,7 @@ Usage:
   playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]
   playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]
   playwright-cli-sessions expect <url> [--title=<substr>] [--selector=<sel>] [--text=<substr>] [--status=<code>] [--session=<name>] [--timeout=<ms>] [--retry=<N>] [--screenshot-on-fail=<path>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
-  playwright-cli-sessions browser <start|stop|status> [--headless] [--channel=<chrome|msedge>] [--json]
+  playwright-cli-sessions browser <start|stop|status> [--channel=<chrome|msedge>] [--json]
   playwright-cli-sessions report "<message>" [--context=<N>] [--no-notify]
   playwright-cli-sessions reports [--limit=<N>] [--json]
 
@@ -866,12 +866,11 @@ async function main(): Promise<void> {
         if (!sub) {
           throw new PcsError(
             "PCS_MISSING_ARG",
-            `browser requires a subcommand.\n  playwright-cli-sessions browser <start|stop|status> [--headless] [--channel=<chrome|msedge>] [--json]`,
+            `browser requires a subcommand.\n  playwright-cli-sessions browser <start|stop|status> [--channel=<chrome|msedge>] [--json]`,
           );
         }
         const channelFlag = flags["channel"];
         await cmdBrowser(sub, {
-          headless: flags["headless"] === true,
           ...(typeof channelFlag === "string" ? { channel: channelFlag } : {}),
           json: flags["json"] === true,
         });

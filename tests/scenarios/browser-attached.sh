@@ -6,7 +6,7 @@
 #
 # Covers:
 #   1. `browser status` with no attached Chrome → "No attached Chrome" message
-#   2. `browser start --headless` launches Chrome; status shows running; state
+#   2. `browser start` with PLAYWRIGHT_CLI_HEADLESS=1 launches Chrome; status shows running; state
 #      file present with pid/port
 #   3. `screenshot` in attached mode succeeds (no new Chrome process launched
 #      — verified by comparing chrome process count before/after)
@@ -44,10 +44,13 @@ out1="$(node "$CLI_JS" browser status 2>&1)" || rc=$?
 assert_exit_code 0 "$rc" "browser status with no attached Chrome exits 0"
 assert_contains "$out1" "No attached Chrome" "status says no attached Chrome"
 
-# ── 2. browser start --headless ─────────────────────────────────────────────
+# ── 2. browser start (PLAYWRIGHT_CLI_HEADLESS=1 scenario-only back-door) ────
+# The public `browser start` has no --headless flag as of v0.8.1 — attached
+# mode is always headful for real usage. This scenario uses the internal env
+# back-door so the 22-scenario suite can run without popping 22 windows.
 rc=0
-out2="$(timeout 60 node "$CLI_JS" browser start --headless 2>&1)" || rc=$?
-assert_exit_code 0 "$rc" "browser start --headless exits 0"
+out2="$(PLAYWRIGHT_CLI_HEADLESS=1 timeout 60 node "$CLI_JS" browser start 2>&1)" || rc=$?
+assert_exit_code 0 "$rc" "browser start (headless via env) exits 0"
 assert_contains "$out2" "Attached Chrome started" "start announces success"
 assert_contains "$out2" "headless" "start reports headless mode"
 

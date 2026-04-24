@@ -51,8 +51,9 @@ SSH tunnel. Every CLI command then drives the remote Chrome transparently
 etc. just work against the tunneled local port).
 
 ```bash
-# Route all browser work to the M2 worker (headless; its screen IS the display for headful)
-PLAYWRIGHT_CLI_REMOTE=m2worker playwright-cli-sessions browser start --headless
+# Route all browser work to the M2 worker. Chrome runs HEADFUL on the worker's
+# screen — that IS its display. There is no --headless option.
+PLAYWRIGHT_CLI_REMOTE=m2worker playwright-cli-sessions browser start
 playwright-cli-sessions screenshot https://example.com --out=/tmp/x.png
 playwright-cli-sessions browser stop    # stops remote Chrome + local tunnel
 ```
@@ -62,6 +63,15 @@ worker host first. If reachable, export `PLAYWRIGHT_CLI_REMOTE=m2worker`
 before `browser start` — all browser work offloads to the worker and never
 pops a window on the local Mac. If the worker is unreachable, fall back
 to local Chrome (unset the env var).
+
+**Attached Chrome is always headful — there is no headless option.**
+The user explicitly does not want headless Chrome anywhere in the normal
+workflow: headless is flaky against real sites, triggers "browser not secure"
+warnings on Google / Microsoft / Apple logins, and breaks pages that gate on
+a visible viewport. If you ever feel tempted to pass `--headless`, don't —
+it won't work, and you'll waste time chasing ghosts. The only exception is
+the scenario test harness, which uses the internal `PLAYWRIGHT_CLI_HEADLESS=1`
+env back-door so CI doesn't pop 22 windows per run.
 
 ### Auto-login playbook — Gmail OTP / magic link (the happy path)
 
@@ -297,8 +307,8 @@ Commands fall back to launch-per-command using the classic stealth Chrome
 
 | Mode | Default | Flags |
 |------|---------|-------|
-| Attached (one Chrome, many commands) | Triggered by `browser start`; auto-detected by every command | `browser start [--headless] [--channel=chrome]` |
-| Launch-per-command (fallback) | **Headless** | `--headed` to force headful; `--headless` or `PLAYWRIGHT_CLI_HEADLESS=1` is explicit default |
+| Attached (one Chrome, many commands) | Triggered by `browser start`; auto-detected by every command. **Always headful** — no `--headless` option. | `browser start [--channel=chrome]` |
+| Launch-per-command (fallback) | Headless (CI / scripts only — avoid for real work) | `--headed` to force headful; `--headless` default |
 
 Attached mode ignores `--headed`/`--headless` at the per-command level — the
 mode is fixed at `browser start` time.
