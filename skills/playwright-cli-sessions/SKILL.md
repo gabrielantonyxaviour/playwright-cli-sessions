@@ -45,9 +45,10 @@ playwright-cli-sessions reports --json --limit=5
 
 | Family | Commands | When |
 |--------|----------|------|
+| **Attached browser (v0.7.0+)** | `browser start`, `browser stop`, `browser status` | Manage the persistent Chrome every command auto-attaches to |
 | **Session management** | `list`, `save`, `restore`, `clone`, `tag`, `delete`, `probe`, `health` | Managing saved logins |
-| **Browser automation** | `screenshot`, `navigate`, `snapshot`, `exec`, `login`, `refresh` | Driving a browser |
-| **Shell assertions** | `expect` | Assert page properties; exits 0/1 |
+| **Browser automation** | `screenshot`, `navigate`, `snapshot`, `exec`, `login`, `refresh` | Driving a browser (auto-attach if one is running) |
+| **Shell assertions** | `expect` | Assert page properties; exits 0/1 (auto-attach) |
 
 ## Quick reference — where to read next
 
@@ -127,30 +128,64 @@ It covers the two most common silent failure modes:
 Also: wait-strategy decision table, login-flow recipe, and backgrounded-crash
 stderr guarantee.
 
-## Headful is the default — you drive the browser, not the user
+## Attached-browser mode — the primary path (v0.7.0+)
 
-As of v0.6.0, every browser command runs **headful** by default. Headless Chrome
-is reliably fingerprintable by real-world anti-bot stacks (Cloudflare, DataDome,
-HUMAN, PerimeterX) no matter how well the stealth patches close the CreepJS
-tells. Headful Chrome launched by this CLI is indistinguishable from the user's
-own browser — so that's the safe default.
+**First thing every session: check for an attached Chrome, and start one if
+needed.** A single persistent Chrome that all commands reuse gives you three
+wins simultaneously:
 
-| Command | Default | Mode note on stderr |
-|---------|---------|---------------------|
-| `screenshot`, `navigate`, `snapshot`, `exec`, `expect` | **headful** | `[pcs] browser: headful chrome` |
-| `login`, `refresh` | **headful** (always) | The user types their credentials into the window you opened |
+1. **No focus-stealing** — one window pops when `browser start` runs; every
+   subsequent command opens a tab in the already-visible Chrome. No new
+   processes, no windows flashing to the front during a multi-step flow.
+2. **Persistent profile** — Google, Microsoft, Apple, and other OAuth
+   providers flag *ephemeral* browser profiles as "not secure." The attached
+   Chrome uses a dedicated user-data-dir that builds up history, cookies,
+   and fingerprint over time, so those providers treat it like a normal
+   daily-driver browser.
+3. **Faster** — no cold-start Chrome launch per command.
 
-**Every invocation prints one stderr line telling you which mode launched**
-(`[pcs] browser: headful chrome` or `[pcs] browser: headless chrome`). Suppress
-it with `PLAYWRIGHT_CLI_QUIET=1` if it's noisy for your pipe.
+### The routine
 
-**Opt into headless only when a window pop-up is genuinely disruptive:**
-- Running the scenario harness (`tests/run.sh` sets `PLAYWRIGHT_CLI_HEADLESS=1`)
-- CI / cron / batch scraping against benign endpoints
-- You're iterating fast on a throwaway `exec` script and the window stealing focus gets in the way
+```bash
+# At the start of the session, or after a reboot:
+playwright-cli-sessions browser status          # is one running?
+playwright-cli-sessions browser start           # if not, launch one
+                                                # (headful — that's the point)
 
-Flip via `--headless` flag or `PLAYWRIGHT_CLI_HEADLESS=1` env. Both are equivalent.
-`--headed` is still accepted but is a no-op (default is already headful).
+# All existing commands now auto-attach:
+playwright-cli-sessions screenshot https://example.com --out=/tmp/x.png
+playwright-cli-sessions navigate https://github.com
+playwright-cli-sessions snapshot https://example.com
+playwright-cli-sessions exec /tmp/script.mjs
+playwright-cli-sessions expect https://example.com --title="Example Domain"
+
+# At the end of the day (optional — can stay open for tomorrow):
+playwright-cli-sessions browser stop
+```
+
+### First-time login for Google/OAuth providers
+
+Open the attached Chrome in the foreground ONCE and log in yourself, just as
+you would in your daily-driver browser. The cookies persist in the profile,
+so every subsequent CLI command that opens a Google property inherits the
+session. **No Playwright-controlled login flow — no "browser not secure" blocks.**
+
+This replaces the old pattern of running `login <name>` for Google. For
+non-OAuth-gated services (GitHub, LinkedIn, Vercel, Supabase) the classic
+`login <name> --url=...` still works and saves into `~/.playwright-sessions/<name>.json`.
+
+### When no attached Chrome is running (fallback)
+
+Commands fall back to launch-per-command using the classic stealth Chrome
+(headless by default). This is the CI / scripts / batch-scrape path.
+
+| Mode | Default | Flags |
+|------|---------|-------|
+| Attached (one Chrome, many commands) | Triggered by `browser start`; auto-detected by every command | `browser start [--headless] [--channel=chrome]` |
+| Launch-per-command (fallback) | **Headless** | `--headed` to force headful; `--headless` or `PLAYWRIGHT_CLI_HEADLESS=1` is explicit default |
+
+Attached mode ignores `--headed`/`--headless` at the per-command level — the
+mode is fixed at `browser start` time.
 
 ## You do the browser work — don't punt it to the user
 
@@ -161,12 +196,13 @@ The whole point of this CLI is that you — the agent — have full browser
 automation at your fingertips. Using it is expected; asking the user to do
 it for you is disrespectful of their time.
 
-**The only unavoidable hand-off is typing passwords into a headful window.**
-Even then, **you open the window** by running `login` or `refresh`; the user
-just types their credentials into the browser you put in front of them. You
-never say "please open Chrome and log into X" — you run the CLI, the CLI
-opens Chrome, and you tell the user "I've opened a login window for X;
-please sign in and press Enter when done."
+**The only unavoidable hand-offs are password entry and CAPTCHA solving.**
+Even then, **you open the window.** In attached mode, the Chrome window is
+already visible; you just navigate it to the login URL and ask the user to
+sign in *in the existing window*. In launch-per-command mode, `login` /
+`refresh` open a fresh headful window, and the user types into that. You
+never say "please open Chrome and log into X yourself" — you drive the
+browser to the right page, then the user does the last-mile typing.
 
 **Decision rubric for common hand-offs:**
 
@@ -399,9 +435,10 @@ wait
   via `login` / `refresh`.
 - **Never launch a browser just to test with auth** — pass `--session=<name>`.
 - **On unexpected behavior: `report`, don't work around.** See top of file.
-- **Default is headful** (v0.6.0+). Opt into headless with `--headless` or
-  `PLAYWRIGHT_CLI_HEADLESS=1` only when window pop-ups are disruptive (CI,
-  batch). `--headed` is a no-op alias.
+- **Attached mode is the primary path** (v0.7.0+). Start the day with
+  `browser start`, and every subsequent browser command will auto-attach —
+  one window, no focus-stealing, persistent profile. Launch-per-command
+  (headless) is the fallback for when no attached Chrome is running.
 - **Always pair screenshots/navs with `--wait-for=<selector>`** to avoid blank captures.
 - **Session expired?** Run `refresh <name>` yourself, then tell the user to
   sign in in the headful window you opened. Same for CAPTCHAs — open the

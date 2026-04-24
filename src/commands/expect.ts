@@ -36,6 +36,7 @@ import { PcsError } from "../errors.js";
 import { checkAuthWall } from "../auth-wall.js";
 import { checkHttpError } from "../http-guard.js";
 import { checkSessionFreshness } from "../session-use.js";
+import { acquireAttachedContext } from "../attached-browser.js";
 import { captureScreenshot } from "../screenshot-guard.js";
 import { dirname } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
@@ -59,7 +60,6 @@ export interface ExpectOptions {
   waitForText?: string;
   waitForCount?: string;
   waitUntil?: "load" | "domcontentloaded" | "networkidle" | "commit";
-  headed?: boolean;
   headless?: boolean;
   screenshotOnFail?: string;
   noProbe?: boolean;
@@ -79,20 +79,45 @@ async function runOnce(
   storageState: StorageState | undefined,
 ): Promise<{ failures: string[]; screenshotBytes?: Buffer }> {
   const timeout = opts.timeout ?? 10000;
-  const browser = await launchStealthChrome({
-    headless: opts.headless === true,
-    channel: opts.channel,
-  });
-  const bundled =
-    process.env.PLAYWRIGHT_CLI_BUNDLED === "1" || opts.channel === "chromium";
-  try {
+
+  const attached = await acquireAttachedContext(
+    storageState ? asPlaywrightSS(storageState) : undefined,
+  );
+
+  type Cleanup = () => Promise<void>;
+  let page: import("playwright").Page;
+  let cleanup: Cleanup;
+
+  if (attached) {
+    const p = await attached.context.newPage();
+    page = p;
+    cleanup = async () => {
+      try {
+        await p.close();
+      } catch {
+        // ignore
+      }
+      await attached.dispose();
+    };
+  } else {
+    const browser = await launchStealthChrome({
+      headless: opts.headless === true,
+      channel: opts.channel,
+    });
+    const bundled =
+      process.env.PLAYWRIGHT_CLI_BUNDLED === "1" || opts.channel === "chromium";
     const context = await createStealthContext(
       browser,
       storageState ? { storageState: asPlaywrightSS(storageState) } : {},
       bundled,
     );
-    const page = await context.newPage();
+    page = await context.newPage();
+    cleanup = async () => {
+      await browser.close();
+    };
+  }
 
+  try {
     let response: Response | null;
     try {
       response = await page.goto(url, {
@@ -226,7 +251,7 @@ async function runOnce(
 
     return { failures, ...(screenshotBytes ? { screenshotBytes } : {}) };
   } finally {
-    await browser.close();
+    await cleanup();
   }
 }
 

@@ -20,6 +20,7 @@ import { checkAuthWall } from "../auth-wall.js";
 import { checkHttpError } from "../http-guard.js";
 import { applyWaits } from "../wait-orchestrator.js";
 import { checkSessionFreshness } from "../session-use.js";
+import { acquireAttachedContext } from "../attached-browser.js";
 
 // Our StorageState has `sameSite: string` but Playwright expects the union type.
 // The data is wire-compatible; use this cast helper to bridge the gap.
@@ -33,7 +34,6 @@ export interface NavigateOptions {
   session?: string;
   snapshot?: boolean;
   channel?: string;
-  headed?: boolean;
   headless?: boolean;
   waitUntil?: "load" | "domcontentloaded" | "networkidle" | "commit";
   waitFor?: string;
@@ -61,6 +61,52 @@ export async function cmdNavigate(
     }
     await checkSessionFreshness(opts.session, saved, { noProbe: opts.noProbe });
     storageState = saved.storageState;
+  }
+
+  const attached = await acquireAttachedContext(
+    storageState ? asPlaywrightSS(storageState) : undefined,
+  );
+
+  if (attached) {
+    const page = await attached.context.newPage();
+    try {
+      let response: import("playwright").Response | null = null;
+      try {
+        response = await page.goto(url, {
+          waitUntil: opts.waitUntil ?? "domcontentloaded",
+          timeout: opts.timeout ?? 30000,
+        });
+      } catch (navErr) {
+        throw new PcsError(
+          "PCS_NAV_FAILED",
+          (navErr as Error).message.split("\n")[0],
+          { url },
+        );
+      }
+      if (!opts.allowAuthWall) {
+        await checkAuthWall(page, url, { session: opts.session });
+      }
+      await checkHttpError(response, url, {
+        allowHttpError: opts.allowHttpError,
+      });
+      await applyWaits(page, opts);
+      const title = await page.title();
+      console.log(`✓ Navigated to ${page.url()}`);
+      console.log(`  Title: ${title}`);
+
+      if (opts.snapshot) {
+        const aria = await page.locator("html").ariaSnapshot();
+        console.log(aria);
+      }
+    } finally {
+      try {
+        await page.close();
+      } catch {
+        // ignore
+      }
+      await attached.dispose();
+    }
+    return;
   }
 
   const browser = await launchStealthChrome({

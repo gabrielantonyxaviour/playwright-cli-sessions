@@ -45,6 +45,7 @@ import { cmdLogin } from "./commands/login.js";
 import { cmdRefresh } from "./commands/refresh.js";
 import { cmdReport, cmdReports } from "./commands/report.js";
 import { cmdExpect } from "./commands/expect.js";
+import { cmdBrowser } from "./commands/browser.js";
 import { PcsError, EXIT_CODE_MAP } from "./errors.js";
 import { levenshtein } from "./levenshtein.js";
 
@@ -174,6 +175,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   ],
   report: ["context", "no-notify"],
   reports: ["limit", "json"],
+  browser: ["headless", "channel", "json"],
 };
 
 /** Return the closest known flag if within edit-distance 2, else undefined. */
@@ -242,15 +244,18 @@ function parseTimeout(value: string | boolean | undefined): number | undefined {
 }
 
 /**
- * Resolve headless mode. Default is HEADFUL (v0.6.0+). Opt in to headless via
- * `--headless` flag or `PLAYWRIGHT_CLI_HEADLESS=1` env (used by the scenario
- * harness, CI, and batch scraping where window pop-ups would be disruptive).
- * `--headed` is accepted as a no-op alias for back-compat.
+ * Resolve headless mode for the launch-fallback path (when no attached Chrome
+ * is running). Default: HEADLESS. `--headed` forces headful. `--headless` is
+ * the explicit default. When both are passed, `--headed` wins.
+ *
+ * Attached mode bypasses this — the attached Chrome's mode is set at
+ * `browser start` time, not per-command. See src/attached-browser.ts.
  */
 function resolveHeadless(flags: Record<string, string | boolean>): boolean {
+  if (flags["headed"] === true) return false;
   if (flags["headless"] === true) return true;
   if (process.env.PLAYWRIGHT_CLI_HEADLESS === "1") return true;
-  return false;
+  return true; // default: headless
 }
 
 function parseMaxDimension(
@@ -289,7 +294,8 @@ Usage:
   playwright-cli-sessions exec <script> [<url>] [--session=<name>] [--headless] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
   playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]
   playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]
-  playwright-cli-sessions expect <url> [--title=<substr>] [--selector=<sel>] [--text=<substr>] [--status=<code>] [--session=<name>] [--timeout=<ms>] [--retry=<N>] [--screenshot-on-fail=<path>] [--headless] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+  playwright-cli-sessions expect <url> [--title=<substr>] [--selector=<sel>] [--text=<substr>] [--status=<code>] [--session=<name>] [--timeout=<ms>] [--retry=<N>] [--screenshot-on-fail=<path>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+  playwright-cli-sessions browser <start|stop|status> [--headless] [--channel=<chrome|msedge>] [--json]
   playwright-cli-sessions report "<message>" [--context=<N>] [--no-notify]
   playwright-cli-sessions reports [--limit=<N>] [--json]
 
@@ -303,21 +309,27 @@ Commands:
   probe       Run live HTTP probes for a session's services
   install     Install skill files into <cwd>/.claude/skills/
   health      Probe all sessions, notify on dead transitions (for LaunchAgent)
-  screenshot  Navigate to a URL and save a PNG screenshot (headful by default)
-  navigate    Navigate to a URL and print page info (headful by default)
-  snapshot    Navigate to a URL and print the ARIA accessibility tree (headful by default)
-  exec        Run a custom script (exports run({ page, context, browser })) against a page (headful by default)
+  screenshot  Navigate to a URL and save a PNG screenshot (attaches if browser running; else headless)
+  navigate    Navigate to a URL and print page info (attaches if browser running; else headless)
+  snapshot    Navigate to a URL and print the ARIA accessibility tree (attaches if browser running; else headless)
+  exec        Run a custom script (exports run({ page, context, browser })) against a page (attaches if browser running; else headless)
   login       Open a visible browser for interactive login and save the session
   refresh     Re-open an existing session to re-authenticate and update it
   expect      Assert page properties (title/selector/text/status) from the shell — exits 0/1
+  browser     Manage the persistent attached Chrome (start | stop | status)
   report      File a structured issue report about unexpected CLI behavior
   reports     List recently filed reports
+
+When an attached Chrome is running (see \`browser start\`), all browser commands
+connect to it via CDP and open a new tab instead of launching a fresh Chrome.
+This eliminates focus-stealing window pops and gives you a persistent profile
+(Google/OAuth logins survive across commands).
 
 Options for screenshot:
   --session=<name>      Load a saved session's cookies (optional)
   --out=<path>          Output PNG path (default: /tmp/screenshot-<ts>.png; parent dir auto-created)
-  --headed              No-op alias (default is now headful as of v0.6.0)
-  --headless            Run headless (default: headful). Also: PLAYWRIGHT_CLI_HEADLESS=1
+  --headed              Launch a visible Chrome window (default: headless). Ignored in attached mode.
+  --headless            Explicit headless (= default). Also: PLAYWRIGHT_CLI_HEADLESS=1. Ignored in attached mode.
   --channel=<channel>   Browser channel: "chrome" (default), "chromium" (bundled), "msedge", etc.
   --wait-for=<selector> CSS selector to wait for after navigation (recommended to avoid blank captures)
   --wait-until=<event>  Playwright waitUntil: load | domcontentloaded (default) | networkidle | commit
@@ -326,24 +338,24 @@ Options for screenshot:
 Options for navigate:
   --session=<name>      Load a saved session's cookies (optional)
   --snapshot            Also print the ARIA accessibility tree
-  --headed              No-op alias (default is now headful as of v0.6.0)
-  --headless            Run headless (default: headful). Also: PLAYWRIGHT_CLI_HEADLESS=1
+  --headed              Launch a visible Chrome window (default: headless). Ignored in attached mode.
+  --headless            Explicit headless (= default). Also: PLAYWRIGHT_CLI_HEADLESS=1. Ignored in attached mode.
   --channel=<channel>   Browser channel: "chrome" (default), "chromium" (bundled), "msedge", etc.
   --wait-for=<selector> CSS selector to wait for after navigation
   --wait-until=<event>  Playwright waitUntil: load | domcontentloaded (default) | networkidle | commit
 
 Options for snapshot:
   --session=<name>      Load a saved session's cookies (optional)
-  --headed              No-op alias (default is now headful as of v0.6.0)
-  --headless            Run headless (default: headful). Also: PLAYWRIGHT_CLI_HEADLESS=1
+  --headed              Launch a visible Chrome window (default: headless). Ignored in attached mode.
+  --headless            Explicit headless (= default). Also: PLAYWRIGHT_CLI_HEADLESS=1. Ignored in attached mode.
   --channel=<channel>   Browser channel: "chrome" (default), "chromium" (bundled), "msedge", etc.
   --wait-for=<selector> CSS selector to wait for after navigation
   --wait-until=<event>  Playwright waitUntil: load | domcontentloaded (default) | networkidle | commit
 
 Options for exec:
   --session=<name>      Load a saved session's cookies (optional)
-  --headed              No-op alias (default is now headful as of v0.6.0)
-  --headless            Run headless (default: headful). Also: PLAYWRIGHT_CLI_HEADLESS=1
+  --headed              Launch a visible Chrome window (default: headless). Ignored in attached mode.
+  --headless            Explicit headless (= default). Also: PLAYWRIGHT_CLI_HEADLESS=1. Ignored in attached mode.
   --channel=<channel>   Browser channel: "chrome" (default), "chromium" (bundled), "msedge", etc.
   --wait-for=<selector> CSS selector to wait for after navigation (only applies when <url> is given)
   --wait-until=<event>  Playwright waitUntil: load | domcontentloaded (default) | networkidle | commit
@@ -584,7 +596,6 @@ async function main(): Promise<void> {
           session: typeof session === "string" ? session : undefined,
           out: typeof out === "string" ? out : undefined,
           channel: typeof channel === "string" ? channel : undefined,
-          headed: flags["headed"] === true,
           headless: resolveHeadless(flags),
           waitUntil: ssWaitUntil,
           waitFor: typeof waitFor === "string" ? waitFor : undefined,
@@ -622,7 +633,6 @@ async function main(): Promise<void> {
           session: typeof session === "string" ? session : undefined,
           snapshot: flags["snapshot"] === true,
           channel: typeof channel === "string" ? channel : undefined,
-          headed: flags["headed"] === true,
           headless: resolveHeadless(flags),
           waitUntil: navWaitUntil,
           waitFor: typeof waitFor === "string" ? waitFor : undefined,
@@ -656,7 +666,6 @@ async function main(): Promise<void> {
         await cmdSnapshot(url, {
           session: typeof session === "string" ? session : undefined,
           channel: typeof channel === "string" ? channel : undefined,
-          headed: flags["headed"] === true,
           headless: resolveHeadless(flags),
           waitUntil: snapWaitUntil,
           waitFor: typeof waitFor === "string" ? waitFor : undefined,
@@ -701,7 +710,6 @@ async function main(): Promise<void> {
           session: typeof session === "string" ? session : undefined,
           url: execUrl,
           channel: typeof channel === "string" ? channel : undefined,
-          headed: flags["headed"] === true,
           headless: resolveHeadless(flags),
           waitUntil: execWaitUntil,
           waitFor: typeof waitFor === "string" ? waitFor : undefined,
@@ -844,12 +852,28 @@ async function main(): Promise<void> {
           ...(typeof screenshotOnFailFlag === "string"
             ? { screenshotOnFail: screenshotOnFailFlag }
             : {}),
-          headed: flags["headed"] === true,
           headless: resolveHeadless(flags),
           noProbe: flags["no-probe"] === true,
           allowHttpError: flags["allow-http-error"] === true,
           maxDimension: parseMaxDimension(flags["max-dimension"]),
           noDownscale: flags["no-downscale"] === true,
+        });
+        break;
+      }
+
+      case "browser": {
+        const sub = rest[0];
+        if (!sub) {
+          throw new PcsError(
+            "PCS_MISSING_ARG",
+            `browser requires a subcommand.\n  playwright-cli-sessions browser <start|stop|status> [--headless] [--channel=<chrome|msedge>] [--json]`,
+          );
+        }
+        const channelFlag = flags["channel"];
+        await cmdBrowser(sub, {
+          headless: flags["headless"] === true,
+          ...(typeof channelFlag === "string" ? { channel: channelFlag } : {}),
+          json: flags["json"] === true,
         });
         break;
       }

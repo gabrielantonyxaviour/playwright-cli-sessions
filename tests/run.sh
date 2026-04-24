@@ -32,12 +32,9 @@ export CLI_JS
 export PCS_SCENARIO_LIB="$SCRIPT_DIR/lib"
 export PCS_FIXTURES="$SCRIPT_DIR/fixtures"
 
-# As of v0.6.0 the browser commands default to HEADFUL. Running the scenario
-# harness headful would pop 20+ Chrome windows per run — disruptive, slow, and
-# focus-stealing. Opt the harness back into headless for speed. Individual
-# scenarios that want to exercise the headful default (see headful-default.sh)
-# override by `unset`-ing this in a subshell.
-export PLAYWRIGHT_CLI_HEADLESS=1
+# v0.7.0+: default is headless again. Any scenario exercising attached mode
+# starts its own Chrome via `browser start [--headless]` in-scenario. Do not
+# force a mode globally here — individual scenarios decide.
 
 # Pick scenarios: specific names or all of scenarios/*.sh
 declare -a SCENARIO_FILES=()

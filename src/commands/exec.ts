@@ -30,6 +30,7 @@ import type { StorageState } from "../store.js";
 import { PcsError } from "../errors.js";
 import { applyWaits } from "../wait-orchestrator.js";
 import { checkSessionFreshness } from "../session-use.js";
+import { acquireAttachedContext } from "../attached-browser.js";
 
 // Our StorageState has `sameSite: string` but Playwright expects the union type.
 // The data is wire-compatible; use this cast helper to bridge the gap.
@@ -43,7 +44,6 @@ export interface ExecOptions {
   session?: string;
   url?: string;
   channel?: string;
-  headed?: boolean;
   headless?: boolean;
   waitUntil?: "load" | "domcontentloaded" | "networkidle" | "commit";
   waitFor?: string;
@@ -127,6 +127,52 @@ export async function cmdExec(
     }
     await checkSessionFreshness(opts.session, saved, { noProbe: opts.noProbe });
     storageState = saved.storageState;
+  }
+
+  const attached = await acquireAttachedContext(
+    storageState ? asPlaywrightSS(storageState) : undefined,
+  );
+
+  if (attached) {
+    const page = await attached.context.newPage();
+    try {
+      if (opts.url) {
+        try {
+          await page.goto(opts.url, {
+            waitUntil: opts.waitUntil ?? "domcontentloaded",
+            timeout: opts.timeout ?? 30000,
+          });
+        } catch (navErr) {
+          throw new PcsError(
+            "PCS_NAV_FAILED",
+            (navErr as Error).message.split("\n")[0],
+            { url: opts.url },
+          );
+        }
+        await applyWaits(page, opts);
+      }
+
+      const result = await run({
+        page,
+        context: attached.context,
+        browser: attached.browser,
+      });
+      if (result !== undefined) {
+        if (typeof result === "string") {
+          console.log(result);
+        } else {
+          console.log(JSON.stringify(result, null, 2));
+        }
+      }
+    } finally {
+      try {
+        await page.close();
+      } catch {
+        // ignore
+      }
+      await attached.dispose();
+    }
+    return;
   }
 
   const browser = await launchStealthChrome({

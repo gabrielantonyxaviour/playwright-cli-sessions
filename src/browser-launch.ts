@@ -94,7 +94,9 @@ const STEALTH_IGNORE = ["--enable-automation"];
 export async function launchStealthChrome(
   opts: LaunchOpts = {},
 ): Promise<Browser> {
-  const headless = opts.headless ?? false;
+  // Default: headless. Callers wire the flag/env → `opts.headless` explicitly.
+  // `login` / `refresh` pass `headless: false` to force the login window.
+  const headless = opts.headless ?? true;
   // --channel=chromium is an explicit opt-out: treat like PLAYWRIGHT_CLI_BUNDLED=1
   const bundled =
     process.env.PLAYWRIGHT_CLI_BUNDLED === "1" || opts.channel === "chromium";
