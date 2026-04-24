@@ -104,9 +104,13 @@ playwright-cli-sessions login <name> --url=https://service.com/login
 # Headful Chrome opens → user logs in → press Enter → state saved.
 ```
 
-**Expired logins:** if `list` shows `[DEAD, 302]`, ask the user to run
-`login` or `refresh`. Do NOT automate password entry, 2FA, CAPTCHA, WebAuthn,
-or OAuth popups — these always fail.
+**Expired logins:** if `list` shows `[DEAD, 302]`, **run `refresh <name>`
+yourself** — the CLI opens a headful browser pre-navigated to the service's
+login URL; tell the user "I've opened the sign-in window for `<name>`; please
+sign in and press Enter when done." Do NOT automate password entry, 2FA,
+CAPTCHA, WebAuthn, or OAuth popups — those require a human, but the human
+types into the window **you** opened, not into a browser they had to launch
+themselves.
 
 ## Before you start scripting
 
@@ -123,19 +127,61 @@ It covers the two most common silent failure modes:
 Also: wait-strategy decision table, login-flow recipe, and backgrounded-crash
 stderr guarantee.
 
-## Headed vs headless — the CLI decides, not you
+## Headful is the default — you drive the browser, not the user
 
-| Command | Default | Rationale |
-|---------|---------|-----------|
-| `screenshot`, `navigate`, `snapshot`, `exec`, `expect` | headless | No human interaction needed. |
-| `login`, `refresh` | **headful** (automatic) | The human signs in. |
+As of v0.6.0, every browser command runs **headful** by default. Headless Chrome
+is reliably fingerprintable by real-world anti-bot stacks (Cloudflare, DataDome,
+HUMAN, PerimeterX) no matter how well the stealth patches close the CreepJS
+tells. Headful Chrome launched by this CLI is indistinguishable from the user's
+own browser — so that's the safe default.
 
-**Decision rubric:**
-- Stateless work → headless. Always.
-- Saved-session work (`--session=<name>`) → headless. Cookies do the work.
-- Login wall / CAPTCHA / 2FA unexpectedly → **stop, `report`, ask the user to
-  run `login` or `refresh`**. `--headed` cannot solve a CAPTCHA.
-- Only pass `--headed` when the human explicitly says "show me" or "let me watch".
+| Command | Default | Mode note on stderr |
+|---------|---------|---------------------|
+| `screenshot`, `navigate`, `snapshot`, `exec`, `expect` | **headful** | `[pcs] browser: headful chrome` |
+| `login`, `refresh` | **headful** (always) | The user types their credentials into the window you opened |
+
+**Every invocation prints one stderr line telling you which mode launched**
+(`[pcs] browser: headful chrome` or `[pcs] browser: headless chrome`). Suppress
+it with `PLAYWRIGHT_CLI_QUIET=1` if it's noisy for your pipe.
+
+**Opt into headless only when a window pop-up is genuinely disruptive:**
+- Running the scenario harness (`tests/run.sh` sets `PLAYWRIGHT_CLI_HEADLESS=1`)
+- CI / cron / batch scraping against benign endpoints
+- You're iterating fast on a throwaway `exec` script and the window stealing focus gets in the way
+
+Flip via `--headless` flag or `PLAYWRIGHT_CLI_HEADLESS=1` env. Both are equivalent.
+`--headed` is still accepted but is a no-op (default is already headful).
+
+## You do the browser work — don't punt it to the user
+
+This is a non-negotiable posture: **when something needs to be done with a
+browser, you run the CLI command yourself.** Do not suggest the user open a
+browser, navigate somewhere, click something, or inspect a page manually.
+The whole point of this CLI is that you — the agent — have full browser
+automation at your fingertips. Using it is expected; asking the user to do
+it for you is disrespectful of their time.
+
+**The only unavoidable hand-off is typing passwords into a headful window.**
+Even then, **you open the window** by running `login` or `refresh`; the user
+just types their credentials into the browser you put in front of them. You
+never say "please open Chrome and log into X" — you run the CLI, the CLI
+opens Chrome, and you tell the user "I've opened a login window for X;
+please sign in and press Enter when done."
+
+**Decision rubric for common hand-offs:**
+
+| Situation | Wrong (don't do) | Right (do this) |
+|-----------|-----------------|----------------|
+| Need to verify something on a page | "Can you open X and check..." | Run `screenshot` / `snapshot` / `navigate` yourself |
+| Session expired (`PCS_STALE_SESSION` / `PCS_AUTH_WALL`) | "Please re-login to X" | Run `playwright-cli-sessions refresh <name>` yourself; tell the user to sign in in the window you opened |
+| First-time service login needed | "Go log into X and save the cookies" | Run `playwright-cli-sessions login <name> --url=...` yourself |
+| Hit a CAPTCHA mid-flow (`PCS_CHALLENGE_WALL`) | "Please complete the CAPTCHA at https://..." | Run `login --url=<blocked-url>` yourself so the user completes the CAPTCHA in the window you opened, then resume |
+| Need to scrape / download something | "Can you download X?" | Write an `exec` script and run it yourself |
+
+**Why this matters:** the user gave you a browser automation tool. Reaching
+for it yourself is the default; asking them to do something in a browser is a
+sign you forgot you had it. If the tool is genuinely insufficient for the task,
+`report` the gap — don't outsource the work.
 
 ## Session staleness check
 
@@ -189,8 +235,16 @@ AUTH_WALL service=github session=(none) url=https://github.com/login?... suggest
 Error [PCS_AUTH_WALL]: auth wall detected at https://github.com/login?...
 ```
 
-Handle exit 77 by prompting the user to `login <name>`. Do NOT retry the same
-command — the session is missing or expired.
+**Handle exit 77 yourself:** run `playwright-cli-sessions refresh <name>` (or
+`login <name> --url=<the-url-you-were-trying>` for first-time setup). The CLI
+opens the browser; tell the user to sign in in the window you opened. Do NOT
+retry the original command until the session is refreshed — it will just
+auth-wall again.
+
+On exit 78 (`PCS_CHALLENGE_WALL` — Cloudflare / hCaptcha / reCAPTCHA), same
+pattern: run `login --url=<blocked-url>` yourself so the user can complete the
+challenge in the window you opened. Do not tell them to open the URL in their
+own browser.
 
 ## Exit codes — most common
 
@@ -215,7 +269,8 @@ playwright-cli-sessions screenshot https://example.com --waite-for=h1
 
 ## Browser automation commands
 
-All browser commands accept: `--session=<name>`, `--no-probe`, `--headed`,
+All browser commands accept: `--session=<name>`, `--no-probe`, `--headless`
+(opt into headless — default is headful, see "Headful is the default"),
 `--channel=<chrome|msedge|chromium|...>`, `--wait-for=<selector>`,
 `--wait-for-text="<str>"`, `--wait-for-count=<selector>:<N>`,
 `--wait-until=<load|domcontentloaded|networkidle|commit>` (or
@@ -338,12 +393,20 @@ wait
 
 ## Rules recap
 
+- **You drive the browser, not the user.** When any task needs a browser,
+  you run the CLI yourself — don't ask the user to open tabs or click things.
+  The only hand-off is the user typing credentials into a window **you** opened
+  via `login` / `refresh`.
 - **Never launch a browser just to test with auth** — pass `--session=<name>`.
 - **On unexpected behavior: `report`, don't work around.** See top of file.
-- **Default headless; never pass `--headed` unprompted.**
+- **Default is headful** (v0.6.0+). Opt into headless with `--headless` or
+  `PLAYWRIGHT_CLI_HEADLESS=1` only when window pop-ups are disruptive (CI,
+  batch). `--headed` is a no-op alias.
 - **Always pair screenshots/navs with `--wait-for=<selector>`** to avoid blank captures.
-- **Expired logins are the user's problem to solve** — ask for `login` / `refresh`;
-  never automate credentials, 2FA, or CAPTCHA.
+- **Session expired?** Run `refresh <name>` yourself, then tell the user to
+  sign in in the headful window you opened. Same for CAPTCHAs — open the
+  window via `login --url=...` yourself. Never automate credentials / 2FA /
+  CAPTCHA content; do automate opening the window that asks for them.
 
 ## Interoperability with playwright-sessions MCP
 

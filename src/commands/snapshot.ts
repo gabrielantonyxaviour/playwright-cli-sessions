@@ -33,6 +33,7 @@ export interface SnapshotOptions {
   session?: string;
   channel?: string;
   headed?: boolean;
+  headless?: boolean;
   waitUntil?: "load" | "domcontentloaded" | "networkidle" | "commit";
   waitFor?: string;
   waitForText?: string;
@@ -62,7 +63,7 @@ export async function cmdSnapshot(
   }
 
   const browser = await launchStealthChrome({
-    headless: !opts.headed,
+    headless: opts.headless === true,
     channel: opts.channel,
   });
   const bundled =

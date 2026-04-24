@@ -94,10 +94,20 @@ const STEALTH_IGNORE = ["--enable-automation"];
 export async function launchStealthChrome(
   opts: LaunchOpts = {},
 ): Promise<Browser> {
-  const headless = opts.headless ?? true;
+  const headless = opts.headless ?? false;
   // --channel=chromium is an explicit opt-out: treat like PLAYWRIGHT_CLI_BUNDLED=1
   const bundled =
     process.env.PLAYWRIGHT_CLI_BUNDLED === "1" || opts.channel === "chromium";
+
+  const channelLabel = bundled ? "chromium" : (opts.channel ?? "chrome");
+  // One-line mode indicator on stderr. Lets scenarios assert mode and gives
+  // users a quick "am I headless or not" glance without --debug. Suppress with
+  // PLAYWRIGHT_CLI_QUIET=1.
+  if (process.env.PLAYWRIGHT_CLI_QUIET !== "1") {
+    process.stderr.write(
+      `[pcs] browser: ${headless ? "headless" : "headful"} ${channelLabel}\n`,
+    );
+  }
 
   if (bundled) {
     return chromium.launch({

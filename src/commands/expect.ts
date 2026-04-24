@@ -60,6 +60,7 @@ export interface ExpectOptions {
   waitForCount?: string;
   waitUntil?: "load" | "domcontentloaded" | "networkidle" | "commit";
   headed?: boolean;
+  headless?: boolean;
   screenshotOnFail?: string;
   noProbe?: boolean;
   allowHttpError?: boolean;
@@ -79,7 +80,7 @@ async function runOnce(
 ): Promise<{ failures: string[]; screenshotBytes?: Buffer }> {
   const timeout = opts.timeout ?? 10000;
   const browser = await launchStealthChrome({
-    headless: !opts.headed,
+    headless: opts.headless === true,
     channel: opts.channel,
   });
   const bundled =

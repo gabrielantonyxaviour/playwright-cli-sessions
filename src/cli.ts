@@ -16,13 +16,13 @@
  *   playwright-cli-sessions probe <name> [--service=X]
  *   playwright-cli-sessions install --skills
  *   playwright-cli-sessions health
- *   playwright-cli-sessions screenshot <url> [--session=<name>] [--out=<path>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>] [--full-page]
- *   playwright-cli-sessions navigate <url> [--session=<name>] [--snapshot] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
- *   playwright-cli-sessions snapshot <url> [--session=<name>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
- *   playwright-cli-sessions exec <script> [<url>] [--session=<name>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+ *   playwright-cli-sessions screenshot <url> [--session=<name>] [--out=<path>] [--headless] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>] [--full-page]
+ *   playwright-cli-sessions navigate <url> [--session=<name>] [--snapshot] [--headless] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+ *   playwright-cli-sessions snapshot <url> [--session=<name>] [--headless] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+ *   playwright-cli-sessions exec <script> [<url>] [--session=<name>] [--headless] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
  *   playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]
  *   playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]
- *   playwright-cli-sessions expect <url> [--title=<substr>] [--selector=<sel>] [--text=<substr>] [--status=<code>] [--session=<name>] [--timeout=<ms>] [--retry=<N>] [--screenshot-on-fail=<path>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+ *   playwright-cli-sessions expect <url> [--title=<substr>] [--selector=<sel>] [--text=<substr>] [--status=<code>] [--session=<name>] [--timeout=<ms>] [--retry=<N>] [--screenshot-on-fail=<path>] [--headless] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
  *   playwright-cli-sessions report "<message>" [--context=<N>] [--no-notify]
  *   playwright-cli-sessions reports [--limit=<N>] [--json]
  */
@@ -86,6 +86,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "session",
     "out",
     "headed",
+    "headless",
     "channel",
     "wait-for",
     "wait-until",
@@ -104,6 +105,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "session",
     "snapshot",
     "headed",
+    "headless",
     "channel",
     "wait-for",
     "wait-until",
@@ -118,6 +120,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   snapshot: [
     "session",
     "headed",
+    "headless",
     "channel",
     "wait-for",
     "wait-until",
@@ -133,6 +136,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "session",
     "url",
     "headed",
+    "headless",
     "channel",
     "wait-for",
     "wait-until",
@@ -162,6 +166,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "wait-for-network",
     "screenshot-on-fail",
     "headed",
+    "headless",
     "no-probe",
     "allow-http-error",
     "max-dimension",
@@ -236,6 +241,18 @@ function parseTimeout(value: string | boolean | undefined): number | undefined {
   return n;
 }
 
+/**
+ * Resolve headless mode. Default is HEADFUL (v0.6.0+). Opt in to headless via
+ * `--headless` flag or `PLAYWRIGHT_CLI_HEADLESS=1` env (used by the scenario
+ * harness, CI, and batch scraping where window pop-ups would be disruptive).
+ * `--headed` is accepted as a no-op alias for back-compat.
+ */
+function resolveHeadless(flags: Record<string, string | boolean>): boolean {
+  if (flags["headless"] === true) return true;
+  if (process.env.PLAYWRIGHT_CLI_HEADLESS === "1") return true;
+  return false;
+}
+
 function parseMaxDimension(
   value: string | boolean | undefined,
 ): number | undefined {
@@ -266,13 +283,13 @@ Usage:
   playwright-cli-sessions probe <name> [--service=X]
   playwright-cli-sessions install --skills
   playwright-cli-sessions health
-  playwright-cli-sessions screenshot <url> [--session=<name>] [--out=<path>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>] [--full-page]
-  playwright-cli-sessions navigate <url> [--session=<name>] [--snapshot] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
-  playwright-cli-sessions snapshot <url> [--session=<name>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
-  playwright-cli-sessions exec <script> [<url>] [--session=<name>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+  playwright-cli-sessions screenshot <url> [--session=<name>] [--out=<path>] [--headless] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>] [--full-page]
+  playwright-cli-sessions navigate <url> [--session=<name>] [--snapshot] [--headless] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+  playwright-cli-sessions snapshot <url> [--session=<name>] [--headless] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+  playwright-cli-sessions exec <script> [<url>] [--session=<name>] [--headless] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
   playwright-cli-sessions login <url> [--session=<name>] [--channel=<channel>]
   playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]
-  playwright-cli-sessions expect <url> [--title=<substr>] [--selector=<sel>] [--text=<substr>] [--status=<code>] [--session=<name>] [--timeout=<ms>] [--retry=<N>] [--screenshot-on-fail=<path>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
+  playwright-cli-sessions expect <url> [--title=<substr>] [--selector=<sel>] [--text=<substr>] [--status=<code>] [--session=<name>] [--timeout=<ms>] [--retry=<N>] [--screenshot-on-fail=<path>] [--headless] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
   playwright-cli-sessions report "<message>" [--context=<N>] [--no-notify]
   playwright-cli-sessions reports [--limit=<N>] [--json]
 
@@ -286,10 +303,10 @@ Commands:
   probe       Run live HTTP probes for a session's services
   install     Install skill files into <cwd>/.claude/skills/
   health      Probe all sessions, notify on dead transitions (for LaunchAgent)
-  screenshot  Navigate to a URL and save a PNG screenshot (headless by default)
-  navigate    Navigate to a URL and print page info (headless by default)
-  snapshot    Navigate to a URL and print the ARIA accessibility tree (headless by default)
-  exec        Run a custom script (exports run({ page, context, browser })) against a page (headless by default)
+  screenshot  Navigate to a URL and save a PNG screenshot (headful by default)
+  navigate    Navigate to a URL and print page info (headful by default)
+  snapshot    Navigate to a URL and print the ARIA accessibility tree (headful by default)
+  exec        Run a custom script (exports run({ page, context, browser })) against a page (headful by default)
   login       Open a visible browser for interactive login and save the session
   refresh     Re-open an existing session to re-authenticate and update it
   expect      Assert page properties (title/selector/text/status) from the shell — exits 0/1
@@ -299,7 +316,8 @@ Commands:
 Options for screenshot:
   --session=<name>      Load a saved session's cookies (optional)
   --out=<path>          Output PNG path (default: /tmp/screenshot-<ts>.png; parent dir auto-created)
-  --headed              Open a visible browser window (default: headless)
+  --headed              No-op alias (default is now headful as of v0.6.0)
+  --headless            Run headless (default: headful). Also: PLAYWRIGHT_CLI_HEADLESS=1
   --channel=<channel>   Browser channel: "chrome" (default), "chromium" (bundled), "msedge", etc.
   --wait-for=<selector> CSS selector to wait for after navigation (recommended to avoid blank captures)
   --wait-until=<event>  Playwright waitUntil: load | domcontentloaded (default) | networkidle | commit
@@ -308,21 +326,24 @@ Options for screenshot:
 Options for navigate:
   --session=<name>      Load a saved session's cookies (optional)
   --snapshot            Also print the ARIA accessibility tree
-  --headed              Open a visible browser window (default: headless)
+  --headed              No-op alias (default is now headful as of v0.6.0)
+  --headless            Run headless (default: headful). Also: PLAYWRIGHT_CLI_HEADLESS=1
   --channel=<channel>   Browser channel: "chrome" (default), "chromium" (bundled), "msedge", etc.
   --wait-for=<selector> CSS selector to wait for after navigation
   --wait-until=<event>  Playwright waitUntil: load | domcontentloaded (default) | networkidle | commit
 
 Options for snapshot:
   --session=<name>      Load a saved session's cookies (optional)
-  --headed              Open a visible browser window (default: headless)
+  --headed              No-op alias (default is now headful as of v0.6.0)
+  --headless            Run headless (default: headful). Also: PLAYWRIGHT_CLI_HEADLESS=1
   --channel=<channel>   Browser channel: "chrome" (default), "chromium" (bundled), "msedge", etc.
   --wait-for=<selector> CSS selector to wait for after navigation
   --wait-until=<event>  Playwright waitUntil: load | domcontentloaded (default) | networkidle | commit
 
 Options for exec:
   --session=<name>      Load a saved session's cookies (optional)
-  --headed              Open a visible browser window (default: headless)
+  --headed              No-op alias (default is now headful as of v0.6.0)
+  --headless            Run headless (default: headful). Also: PLAYWRIGHT_CLI_HEADLESS=1
   --channel=<channel>   Browser channel: "chrome" (default), "chromium" (bundled), "msedge", etc.
   --wait-for=<selector> CSS selector to wait for after navigation (only applies when <url> is given)
   --wait-until=<event>  Playwright waitUntil: load | domcontentloaded (default) | networkidle | commit
@@ -564,6 +585,7 @@ async function main(): Promise<void> {
           out: typeof out === "string" ? out : undefined,
           channel: typeof channel === "string" ? channel : undefined,
           headed: flags["headed"] === true,
+          headless: resolveHeadless(flags),
           waitUntil: ssWaitUntil,
           waitFor: typeof waitFor === "string" ? waitFor : undefined,
           waitForText:
@@ -601,6 +623,7 @@ async function main(): Promise<void> {
           snapshot: flags["snapshot"] === true,
           channel: typeof channel === "string" ? channel : undefined,
           headed: flags["headed"] === true,
+          headless: resolveHeadless(flags),
           waitUntil: navWaitUntil,
           waitFor: typeof waitFor === "string" ? waitFor : undefined,
           waitForText:
@@ -634,6 +657,7 @@ async function main(): Promise<void> {
           session: typeof session === "string" ? session : undefined,
           channel: typeof channel === "string" ? channel : undefined,
           headed: flags["headed"] === true,
+          headless: resolveHeadless(flags),
           waitUntil: snapWaitUntil,
           waitFor: typeof waitFor === "string" ? waitFor : undefined,
           waitForText:
@@ -678,6 +702,7 @@ async function main(): Promise<void> {
           url: execUrl,
           channel: typeof channel === "string" ? channel : undefined,
           headed: flags["headed"] === true,
+          headless: resolveHeadless(flags),
           waitUntil: execWaitUntil,
           waitFor: typeof waitFor === "string" ? waitFor : undefined,
           waitForText:
@@ -820,6 +845,7 @@ async function main(): Promise<void> {
             ? { screenshotOnFail: screenshotOnFailFlag }
             : {}),
           headed: flags["headed"] === true,
+          headless: resolveHeadless(flags),
           noProbe: flags["no-probe"] === true,
           allowHttpError: flags["allow-http-error"] === true,
           maxDimension: parseMaxDimension(flags["max-dimension"]),
