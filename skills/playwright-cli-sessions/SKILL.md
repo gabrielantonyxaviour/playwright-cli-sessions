@@ -42,6 +42,47 @@ playwright-cli-sessions browser start
 From here, every `screenshot` / `navigate` / `snapshot` / `exec` / `expect` /
 `login` auto-attaches to that Chrome. No further setup.
 
+### ⚑ Browser is the LAST resort — check for CLI/API FIRST, every time
+
+**Before any `screenshot` / `navigate` / `exec` / `expect`, ask: does this
+service have a CLI or REST API for what I'm about to do?** If yes, do not
+open the browser. Not on attempt 1. Not "as a fallback." On attempt 0.
+
+| Service | Use this, Playwright is forbidden for these |
+|---|---|
+| GitHub | `gh` CLI: `gh repo rename`, `gh api`, `gh pr ...` |
+| Vercel | `vercel` CLI |
+| Supabase | `supabase` CLI + Management API + `psql` |
+| Cloudflare | `wrangler` + REST API |
+| AWS/GCP/Azure | `aws` / `gcloud` / `az` |
+| Stripe/Razorpay/Paddle | REST APIs (keys in `~/.claude/vault/`) |
+| Resend/Postmark/SendGrid | REST APIs |
+| npm/pip/brew | package CLIs |
+| DNS (any provider) | API |
+| Linear / Jira | REST APIs |
+| Notion | Notion API |
+| Slack | Slack Web API |
+| Databases | SQL via the right driver |
+
+**Real failure mode** (2026-04-25, session `a13060a3-...`): an agent spent
+16 minutes writing **19 separate `/tmp/gh-*.mjs` scripts** to click GitHub
+repo-settings buttons. The right answer — `gh repo rename`,
+`gh api -X PATCH /repos/.../`, `gh repo delete` — was 5 seconds. There
+was no point at which Playwright was the correct tool, including attempt 1.
+
+**Browser is for:** visual checks (`screenshot`), OAuth user-facing flows
+without public APIs, genuinely API-less SaaS, things that need human eyes
+on rendered output. **Not** for: repo renames, env-var management, DNS
+records, package installs, or anything with an API.
+
+**If a Playwright command DOES fail mid-task** (and you're correctly in the
+browser because no API exists for it): that's a selector/timing bug to
+debug. Don't loop. Screenshot, describe what you see, ask the user. File
+a `playwright-cli-sessions report` if the CLI itself misbehaved. Never
+write a `-v2.mjs` / `-v3.mjs` cascade.
+
+The principle: **right tool on attempt 0, not after 3 strikes.**
+
 ### Tabs persist by default (v0.9.2+)
 
 In attached mode, `screenshot` / `navigate` / `snapshot` / `exec` / `expect`
