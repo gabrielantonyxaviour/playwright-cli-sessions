@@ -30,6 +30,7 @@ import type { StorageState } from "../store.js";
 import { PcsError } from "../errors.js";
 import { applyWaits } from "../wait-orchestrator.js";
 import { checkSessionFreshness } from "../session-use.js";
+import { wrapPageScreenshot } from "../screenshot-guard.js";
 import {
   acquireAttachedContext,
   guardLocalLaunch,
@@ -140,6 +141,11 @@ export async function cmdExec(
 
   if (attached) {
     const page = await attached.context.newPage();
+    // Auto-downscale any page.screenshot() call inside the user's script.
+    // Without this, raw Playwright produces 2880×1800-class images that
+    // Anthropic's 2000px many-image limit rejects when the agent later
+    // Reads the file.
+    wrapPageScreenshot(page);
     try {
       if (opts.url) {
         try {
@@ -199,6 +205,7 @@ export async function cmdExec(
     );
     try {
       const page = await context.newPage();
+      wrapPageScreenshot(page);
 
       if (opts.url) {
         try {

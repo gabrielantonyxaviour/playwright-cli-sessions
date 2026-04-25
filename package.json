@@ -1,6 +1,6 @@
 {
   "name": "playwright-cli-sessions",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "description": "Session management layer for @playwright/cli — named saved logins, service probes, clone safety. Reads/writes ~/.playwright-sessions/ (interop with playwright-sessions MCP).",
   "type": "module",
   "main": "dist/index.js",

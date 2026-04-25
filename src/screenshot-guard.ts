@@ -30,7 +30,11 @@ export interface GuardOpts {
   noDownscale?: boolean;
 }
 
-const DEFAULT_MAX = 2000;
+// Anthropic's many-image dimension limit is 2000px. Their check appears to
+// reject at exactly 2000 (we've seen "exceeds the dimension limit (2000px)"
+// from sources reported as 2000-and-something). Hold a safety margin so we
+// never produce an image that gets rejected on that boundary.
+const DEFAULT_MAX = 1900;
 
 function resolveMaxDim(opts: GuardOpts): number {
   if (opts.maxDimension !== undefined) return opts.maxDimension;
@@ -93,4 +97,66 @@ export async function captureScreenshot(
 
   if (opts.path) writeFileSync(opts.path, resized);
   return resized;
+}
+
+/**
+ * Monkey-patch `page.screenshot()` so any call inside an `exec` script
+ * automatically gets the same downscale guard as the `screenshot` subcommand.
+ *
+ * Background: agents often write `await page.screenshot({ path: ... })`
+ * directly inside an exec `.mjs` script. Without this wrapper, those go
+ * straight to Playwright's raw screenshot, which produces 2880×1800 (Mac DPR-2)
+ * or larger files that Anthropic's many-image limit (2000px) rejects when the
+ * agent later tries to read them.
+ *
+ * The wrapper:
+ * - applies `scale: 'css'` so DPR-2 doesn't double the output
+ * - downscales the buffer through sharp to fit within DEFAULT_MAX (1900) on
+ *   each axis
+ * - if `path` is provided in the original opts, writes the downscaled buffer
+ *   to that path
+ *
+ * Skip via `PLAYWRIGHT_CLI_NO_DOWNSCALE=1` env (which already shouldSkip
+ * honors). Per-call `noDownscale` is not exposed because `page.screenshot()`'s
+ * Playwright signature doesn't accept it.
+ */
+export function wrapPageScreenshot(page: Page): void {
+  const original = page.screenshot.bind(page);
+  // Wrap. We don't worry about TS strictness — this is a runtime monkey-patch
+  // for the user's exec script convenience.
+  (page as unknown as { screenshot: typeof page.screenshot }).screenshot =
+    async function (o?: Parameters<typeof original>[0]): Promise<Buffer> {
+      const original_opts = o ?? {};
+      // Force scale: 'css' unless caller overrides — keeps DPR-2 from doubling.
+      const buf = await original({
+        ...original_opts,
+        // Strip path so original doesn't write the un-downscaled bytes.
+        path: undefined,
+        scale: original_opts.scale ?? "css",
+      });
+      if (shouldSkip({})) {
+        if (original_opts.path) writeFileSync(original_opts.path, buf);
+        return buf;
+      }
+      const maxDim = resolveMaxDim({});
+      const meta = await sharp(buf).metadata();
+      const w = meta.width ?? 0;
+      const h = meta.height ?? 0;
+      if (w <= maxDim && h <= maxDim) {
+        if (original_opts.path) writeFileSync(original_opts.path, buf);
+        return buf;
+      }
+      const scale = Math.min(maxDim / w, maxDim / h);
+      const newW = Math.floor(w * scale);
+      const newH = Math.floor(h * scale);
+      const resized = await sharp(buf)
+        .resize(newW, newH, { fit: "inside" })
+        .png()
+        .toBuffer();
+      process.stderr.write(
+        `ℹ Downscaled exec page.screenshot ${w}×${h} → ${newW}×${newH} (max-dimension ${maxDim})\n`,
+      );
+      if (original_opts.path) writeFileSync(original_opts.path, resized);
+      return resized;
+    };
 }

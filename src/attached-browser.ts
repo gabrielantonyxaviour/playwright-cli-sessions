@@ -528,6 +528,39 @@ export async function acquireAttachedContext(
   const contexts = browser.contexts();
   const context =
     contexts.length > 0 ? contexts[0]! : await browser.newContext();
+
+  // Tab cap with LRU eviction. Multiple Claude Code sessions all attach to
+  // the same Chrome via the persistent profile context, and each command
+  // opens a new tab (v0.9.2+ keeps tabs open by default). Without a cap
+  // they pile up — observed up to 20+ tabs across 3-4 sessions, making
+  // Chrome unusable. Default cap = 12; override via PLAYWRIGHT_CLI_TAB_CAP.
+  // Tabs are closed in creation order (oldest first) — `context.pages()`
+  // preserves that ordering.
+  const capRaw = process.env.PLAYWRIGHT_CLI_TAB_CAP;
+  const TAB_CAP = (() => {
+    if (capRaw && capRaw.length > 0) {
+      const n = parseInt(capRaw, 10);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    return 12;
+  })();
+  const pages = context.pages();
+  // Leave at least 1 slot free so the caller's newPage() doesn't re-trigger
+  // the cap. So evict down to TAB_CAP - 1.
+  if (pages.length >= TAB_CAP) {
+    const toClose = pages.length - (TAB_CAP - 1);
+    for (let i = 0; i < toClose && i < pages.length; i++) {
+      try {
+        await pages[i]!.close();
+      } catch {
+        // already closed; skip
+      }
+    }
+    process.stderr.write(
+      `[pcs] tab cap (${TAB_CAP}) reached — closed ${toClose} oldest tab(s)\n`,
+    );
+  }
+
   return {
     browser,
     context,
