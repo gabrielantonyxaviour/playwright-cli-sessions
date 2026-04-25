@@ -30,11 +30,16 @@ export interface GuardOpts {
   noDownscale?: boolean;
 }
 
-// Anthropic's many-image dimension limit is 2000px. Their check appears to
-// reject at exactly 2000 (we've seen "exceeds the dimension limit (2000px)"
-// from sources reported as 2000-and-something). Hold a safety margin so we
-// never produce an image that gets rejected on that boundary.
-const DEFAULT_MAX = 1900;
+// Anthropic's many-image dimension limit is 2000px on either axis. Anything
+// at or near that boundary gets rejected when the conversation accumulates
+// multiple images. Default to 1500 — a 25% safety margin under 2000 — so
+// agents can pile up screenshots throughout a session without ever hitting
+// the limit. Visual fidelity at 1500px is still plenty for inspection
+// ("did this page render correctly?", reading dashboard text, spotting
+// layout issues). Override per-call with `--max-dimension=<N>` or globally
+// via `PLAYWRIGHT_CLI_MAX_DIMENSION=<N>` only if you specifically need
+// higher resolution and accept the rejection risk.
+const DEFAULT_MAX = 1500;
 
 function resolveMaxDim(opts: GuardOpts): number {
   if (opts.maxDimension !== undefined) return opts.maxDimension;
