@@ -32,6 +32,13 @@ export CLI_JS
 export PCS_SCENARIO_LIB="$SCRIPT_DIR/lib"
 export PCS_FIXTURES="$SCRIPT_DIR/fixtures"
 
+# Scenarios test the local launch path. Unset PLAYWRIGHT_CLI_REMOTE so the
+# strict no-fallback guard (v0.9.1+) doesn't throw — the harness itself is
+# the explicit "running locally is OK" case. Individual scenarios that
+# exercise remote routing should re-export it inside their own subshell.
+unset PLAYWRIGHT_CLI_REMOTE
+unset PLAYWRIGHT_CLI_ALLOW_LOCAL_FALLBACK
+
 # v0.7.0+: default is headless again. Any scenario exercising attached mode
 # starts its own Chrome via `browser start [--headless]` in-scenario. Do not
 # force a mode globally here — individual scenarios decide.

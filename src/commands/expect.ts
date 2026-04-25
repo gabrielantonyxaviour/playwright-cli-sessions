@@ -36,7 +36,10 @@ import { PcsError } from "../errors.js";
 import { checkAuthWall } from "../auth-wall.js";
 import { checkHttpError } from "../http-guard.js";
 import { checkSessionFreshness } from "../session-use.js";
-import { acquireAttachedContext } from "../attached-browser.js";
+import {
+  acquireAttachedContext,
+  guardLocalLaunch,
+} from "../attached-browser.js";
 import { captureScreenshot } from "../screenshot-guard.js";
 import { dirname } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
@@ -100,6 +103,7 @@ async function runOnce(
       await attached.dispose();
     };
   } else {
+    guardLocalLaunch();
     const browser = await launchStealthChrome({
       headless: opts.headless === true,
       channel: opts.channel,

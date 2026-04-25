@@ -42,6 +42,30 @@ playwright-cli-sessions browser start
 From here, every `screenshot` / `navigate` / `snapshot` / `exec` / `expect` /
 `login` auto-attaches to that Chrome. No further setup.
 
+### Strict no-fallback (v0.9.1+) — `PCS_REMOTE_UNREACHABLE` (exit 79)
+
+When `PLAYWRIGHT_CLI_REMOTE` is set in the environment but no attached
+Chrome is available (no `browser start`, dead state, or SSH tunnel down),
+**the CLI refuses to silently spawn a local Chrome.** Every browser command
+throws `PCS_REMOTE_UNREACHABLE` (exit 79) instead.
+
+**What you (the agent) do when you see this error:**
+
+1. Run `playwright-cli-sessions browser status` to confirm the state.
+2. Run `tailscale status | grep workers-macbook-pro` to see if M2 is up.
+3. If M2 is up but no attached: `playwright-cli-sessions browser start`
+   (auto-routes to M2). Retry the original command.
+4. If M2 is down: **STOP and ask Gabriel.** Surface the failure with the
+   error text. Offer three options:
+   - Wait for M2 to come back up
+   - Run locally on M4 once (you'll set `PLAYWRIGHT_CLI_ALLOW_LOCAL_FALLBACK=1`)
+   - Abort the task
+
+**You must not autonomously set `PLAYWRIGHT_CLI_ALLOW_LOCAL_FALLBACK=1`.**
+That env var is the explicit "I accept Chrome on M4 right now" opt-in. Only
+the user can authorize it. The whole point of strict-fallback is that
+silent local Chrome spawns disrespect the user's stated preference.
+
 ### Remote worker routing (Tailscale → M2 worker)
 
 When `PLAYWRIGHT_CLI_REMOTE=m2worker` is set, `browser start` SSHes to the

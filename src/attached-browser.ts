@@ -31,6 +31,7 @@ import type {
 } from "playwright";
 import { chromium } from "playwright";
 import { SESSION_STORE_ROOT, ensureRoot } from "./store.js";
+import { PcsError } from "./errors.js";
 
 const STATE_FILE = join(SESSION_STORE_ROOT, ".attached-browser.json");
 const PROFILE_DIR = join(SESSION_STORE_ROOT, ".chrome-profile");
@@ -177,6 +178,49 @@ async function findChromePidByPort(
     await sleep(100);
   }
   return null;
+}
+
+/**
+ * Guard the launch-fallback path. The fallback `launchStealthChrome` spawns
+ * a fresh local Chrome on whichever Mac the CLI runs on. The user has been
+ * very clear: if `PLAYWRIGHT_CLI_REMOTE` is set, the entire intent is to
+ * route work to that remote host — silently spawning Chrome on the local
+ * Mac defeats the point and steals focus.
+ *
+ * This helper throws PCS_REMOTE_UNREACHABLE when PLAYWRIGHT_CLI_REMOTE is
+ * set without an explicit opt-in via PLAYWRIGHT_CLI_ALLOW_LOCAL_FALLBACK=1.
+ *
+ * Call this at the TOP of every command's launch-fallback branch — before
+ * `launchStealthChrome` is invoked. The error message is actionable: it
+ * tells the agent to (a) start an attached Chrome (`browser start`), or
+ * (b) verify Tailscale, or (c) explicitly opt into local with the env var
+ * after asking the user.
+ */
+export function guardLocalLaunch(): void {
+  const remote = process.env.PLAYWRIGHT_CLI_REMOTE;
+  if (!remote || remote.length === 0) return; // no remote requested — local launch fine
+  if (process.env.PLAYWRIGHT_CLI_ALLOW_LOCAL_FALLBACK === "1") return; // explicit opt-in
+  throw new PcsError(
+    "PCS_REMOTE_UNREACHABLE",
+    `PLAYWRIGHT_CLI_REMOTE=${remote} is set, but no attached Chrome is running ` +
+      `(or the SSH tunnel is dead).\n` +
+      `\n` +
+      `Refusing to silently spawn Chrome locally — that would defeat the\n` +
+      `routing-to-remote intent and pop a window on the wrong Mac.\n` +
+      `\n` +
+      `Try in order:\n` +
+      `  1. playwright-cli-sessions browser status\n` +
+      `     (verifies whether attached Chrome on ${remote} is alive)\n` +
+      `  2. playwright-cli-sessions browser start\n` +
+      `     (auto-routes to ${remote} via SSH tunnel)\n` +
+      `  3. tailscale status | grep workers-macbook-pro\n` +
+      `     (verifies remote host is reachable)\n` +
+      `\n` +
+      `Only as a last resort, with the user's explicit permission, set\n` +
+      `PLAYWRIGHT_CLI_ALLOW_LOCAL_FALLBACK=1 to permit a local Chrome\n` +
+      `launch. Don't set it autonomously — ask first.`,
+    { remote, allow: process.env.PLAYWRIGHT_CLI_ALLOW_LOCAL_FALLBACK ?? null },
+  );
 }
 
 /** Public: is an attached Chrome currently registered AND alive AND listening? */

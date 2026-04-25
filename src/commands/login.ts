@@ -24,6 +24,7 @@ import {
 } from "../browser-launch.js";
 import { readSaved, saveStorageState } from "../store.js";
 import type { StorageState } from "../store.js";
+import { guardLocalLaunch } from "../attached-browser.js";
 
 // Our StorageState has `sameSite: string` but Playwright expects the union type.
 // The data is wire-compatible; use this cast helper to bridge the gap.
@@ -54,6 +55,10 @@ export async function cmdLogin(
   }
 
   console.log(`Opening browser at ${url}...`);
+  // login is inherently a local-Mac operation (user types credentials in
+  // a window on whichever Mac is in front of them). If PLAYWRIGHT_CLI_REMOTE
+  // is set, that window would pop on the wrong Mac — refuse and ask.
+  guardLocalLaunch();
   const browser = await launchStealthChrome({
     headless: false,
     channel: opts.channel,

@@ -20,7 +20,10 @@ import { checkAuthWall } from "../auth-wall.js";
 import { checkHttpError } from "../http-guard.js";
 import { applyWaits } from "../wait-orchestrator.js";
 import { checkSessionFreshness } from "../session-use.js";
-import { acquireAttachedContext } from "../attached-browser.js";
+import {
+  acquireAttachedContext,
+  guardLocalLaunch,
+} from "../attached-browser.js";
 
 // Our StorageState has `sameSite: string` but Playwright expects the union type.
 // The data is wire-compatible; use this cast helper to bridge the gap.
@@ -108,6 +111,8 @@ export async function cmdNavigate(
     }
     return;
   }
+
+  guardLocalLaunch();
 
   const browser = await launchStealthChrome({
     headless: opts.headless === true,

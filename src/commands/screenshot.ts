@@ -24,7 +24,10 @@ import { checkHttpError } from "../http-guard.js";
 import { applyWaits } from "../wait-orchestrator.js";
 import { checkSessionFreshness } from "../session-use.js";
 import { captureScreenshot } from "../screenshot-guard.js";
-import { acquireAttachedContext } from "../attached-browser.js";
+import {
+  acquireAttachedContext,
+  guardLocalLaunch,
+} from "../attached-browser.js";
 
 // Our StorageState has `sameSite: string` but Playwright expects the union type.
 // The data is wire-compatible; use this cast helper to bridge the gap.
@@ -124,6 +127,10 @@ export async function cmdScreenshot(
     }
     return;
   }
+
+  // No attached Chrome available. Refuse to silently spawn a local Chrome
+  // when PLAYWRIGHT_CLI_REMOTE is set — that'd pop a window on the wrong Mac.
+  guardLocalLaunch();
 
   const browser = await launchStealthChrome({
     headless: opts.headless === true,

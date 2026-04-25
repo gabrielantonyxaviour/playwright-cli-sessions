@@ -27,6 +27,7 @@ import {
 import { readSaved, saveStorageState } from "../store.js";
 import type { StorageState } from "../store.js";
 import { PcsError } from "../errors.js";
+import { guardLocalLaunch } from "../attached-browser.js";
 
 type PlaywrightStorageState = NonNullable<
   BrowserContextOptions["storageState"]
@@ -62,6 +63,7 @@ export async function cmdRefresh(
   }
 
   console.log(`Refreshing session "${name}" at ${url}...`);
+  guardLocalLaunch();
   const browser = await launchStealthChrome({
     headless: false,
     channel: opts.channel,

@@ -12,6 +12,7 @@ export type PcsErrorCode =
   | "PCS_INVALID_INPUT"
   | "PCS_SESSION_NOT_FOUND"
   | "PCS_BROWSER_CRASH"
+  | "PCS_REMOTE_UNREACHABLE"
   | "PCS_UNKNOWN";
 
 export class PcsError extends Error {
@@ -39,5 +40,6 @@ export const EXIT_CODE_MAP: Record<PcsErrorCode, number> = {
   PCS_INVALID_INPUT: 2,
   PCS_SESSION_NOT_FOUND: 3,
   PCS_BROWSER_CRASH: 20,
+  PCS_REMOTE_UNREACHABLE: 79,
   PCS_UNKNOWN: 1,
 };
