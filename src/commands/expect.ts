@@ -69,6 +69,8 @@ export interface ExpectOptions {
   allowHttpError?: boolean;
   maxDimension?: number;
   noDownscale?: boolean;
+  /** Attached mode only: close the tab after the command. Default: keep open. */
+  closeTab?: boolean;
 }
 
 /**
@@ -95,10 +97,15 @@ async function runOnce(
     const p = await attached.context.newPage();
     page = p;
     cleanup = async () => {
-      try {
-        await p.close();
-      } catch {
-        // ignore
+      // v0.9.2+: keep the tab open by default in attached mode so the user
+      // can see what was rendered (especially useful when expectations
+      // failed and they want to inspect the page).
+      if (opts.closeTab === true) {
+        try {
+          await p.close();
+        } catch {
+          // ignore
+        }
       }
       await attached.dispose();
     };

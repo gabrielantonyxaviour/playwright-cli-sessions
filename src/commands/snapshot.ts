@@ -45,6 +45,8 @@ export interface SnapshotOptions {
   allowHttpError?: boolean;
   allowAuthWall?: boolean;
   timeout?: number;
+  /** Attached mode only: close the tab after the command. Default: keep open. */
+  closeTab?: boolean;
 }
 
 export async function cmdSnapshot(
@@ -95,10 +97,13 @@ export async function cmdSnapshot(
       const aria = await page.locator("html").ariaSnapshot();
       console.log(aria);
     } finally {
-      try {
-        await page.close();
-      } catch {
-        // ignore
+      // v0.9.2+: keep the tab open by default in attached mode.
+      if (opts.closeTab === true) {
+        try {
+          await page.close();
+        } catch {
+          // ignore
+        }
       }
       await attached.dispose();
     }

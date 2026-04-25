@@ -25,10 +25,13 @@ import { PcsError } from "../errors.js";
 export interface BrowserOptions {
   channel?: string;
   json?: boolean;
+  /** For `tabs close-all`: only close tabs whose URL contains this substring. */
+  match?: string;
 }
 
 export async function cmdBrowser(
   sub: string,
+  rest: string[] = [],
   opts: BrowserOptions = {},
 ): Promise<void> {
   switch (sub) {
@@ -40,12 +43,129 @@ export async function cmdBrowser(
       return doStatus(opts);
     case "import-sessions":
       return doImportSessions();
+    case "tabs": {
+      const subsub = rest[0];
+      if (subsub === "list") return doTabsList(opts);
+      if (subsub === "close-all") return doTabsCloseAll(opts);
+      throw new PcsError(
+        "PCS_INVALID_INPUT",
+        `Unknown browser tabs subcommand "${subsub ?? ""}". Expected: list | close-all`,
+        { subcommand: `tabs ${subsub ?? ""}` },
+      );
+    }
     default:
       throw new PcsError(
         "PCS_INVALID_INPUT",
-        `Unknown browser subcommand "${sub}". Expected: start | stop | status | import-sessions`,
+        `Unknown browser subcommand "${sub}". Expected: start | stop | status | import-sessions | tabs`,
         { subcommand: sub },
       );
+  }
+}
+
+async function doTabsList(opts: BrowserOptions): Promise<void> {
+  const browser = await tryAttach();
+  if (!browser) {
+    throw new PcsError(
+      "PCS_INVALID_INPUT",
+      `No attached Chrome is running. Run \`browser start\` first.`,
+    );
+  }
+  try {
+    const ctx = browser.contexts()[0];
+    if (!ctx) {
+      process.stdout.write("(no contexts in attached browser)\n");
+      return;
+    }
+    const pages = ctx.pages();
+    const out: Array<{ index: number; url: string; title: string }> = [];
+    for (let i = 0; i < pages.length; i++) {
+      const page = pages[i]!;
+      const url = page.url();
+      let title = "";
+      try {
+        title = await page.title();
+      } catch {
+        title = "(no title)";
+      }
+      out.push({ index: i, url, title });
+    }
+    if (opts.json === true) {
+      process.stdout.write(JSON.stringify(out, null, 2) + "\n");
+    } else if (out.length === 0) {
+      process.stdout.write("(no tabs open)\n");
+    } else {
+      for (const t of out) {
+        process.stdout.write(
+          `  [${t.index}] ${t.url}\n      ${t.title || "(no title)"}\n`,
+        );
+      }
+      process.stdout.write(`\nTotal: ${out.length} tab(s)\n`);
+    }
+  } finally {
+    try {
+      await browser.close();
+    } catch {
+      // ignore — disconnects CDP only
+    }
+  }
+}
+
+async function doTabsCloseAll(opts: BrowserOptions): Promise<void> {
+  const browser = await tryAttach();
+  if (!browser) {
+    throw new PcsError(
+      "PCS_INVALID_INPUT",
+      `No attached Chrome is running. Run \`browser start\` first.`,
+    );
+  }
+  try {
+    const ctx = browser.contexts()[0];
+    if (!ctx) {
+      process.stdout.write("(no contexts in attached browser)\n");
+      return;
+    }
+    const pages = ctx.pages();
+    const match = opts.match;
+    let closed = 0;
+    let skipped = 0;
+    // Always leave at least one tab alive — closing the last tab can shut
+    // the window. Open `about:blank` if we're about to close everything.
+    const matched: typeof pages = [];
+    for (const page of pages) {
+      if (match && match.length > 0 && !page.url().includes(match)) {
+        skipped += 1;
+        continue;
+      }
+      matched.push(page);
+    }
+    if (matched.length === pages.length && pages.length > 0) {
+      // We'd close every tab — open a placeholder first so the window stays.
+      try {
+        const placeholder = await ctx.newPage();
+        await placeholder.goto("about:blank").catch(() => undefined);
+      } catch {
+        // best-effort
+      }
+    }
+    for (const page of matched) {
+      try {
+        await page.close();
+        closed += 1;
+      } catch {
+        // already closed; skip
+      }
+    }
+    process.stdout.write(
+      match
+        ? `Closed ${closed} tab(s) matching "${match}" (${skipped} kept).\n`
+        : `Closed ${closed} tab(s).\n`,
+    );
+  } finally {
+    try {
+      await browser.close();
+    } catch {
+      // ignore
+    }
   }
 }
 

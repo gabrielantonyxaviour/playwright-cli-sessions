@@ -53,6 +53,8 @@ export interface ScreenshotOptions {
   timeout?: number;
   maxDimension?: number;
   noDownscale?: boolean;
+  /** Attached mode only: close the tab after the command. Default: keep open. */
+  closeTab?: boolean;
 }
 
 export async function cmdScreenshot(
@@ -118,10 +120,16 @@ export async function cmdScreenshot(
       console.log(`✓ Screenshot saved to ${outPath}`);
       console.log(`  Page: ${title} — ${page.url()}`);
     } finally {
-      try {
-        await page.close();
-      } catch {
-        // ignore — tab may have already crashed
+      // v0.9.2+: tabs stay open by default in attached mode so the user can
+      // see what was just rendered. Pass --close-tab (opts.closeTab) to opt
+      // into the old auto-close behavior — useful in batch scripts that
+      // generate hundreds of pages and don't want them piling up.
+      if (opts.closeTab === true) {
+        try {
+          await page.close();
+        } catch {
+          // ignore — tab may have already crashed
+        }
       }
       await attached.dispose();
     }

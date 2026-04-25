@@ -56,6 +56,8 @@ export interface ExecOptions {
   allowAuthWall?: boolean;
   timeout?: number;
   evalScript?: string;
+  /** Attached mode only: close the tab after the command. Default: keep open. */
+  closeTab?: boolean;
 }
 
 interface ScriptModule {
@@ -168,10 +170,13 @@ export async function cmdExec(
         }
       }
     } finally {
-      try {
-        await page.close();
-      } catch {
-        // ignore
+      // v0.9.2+: keep the tab open by default in attached mode.
+      if (opts.closeTab === true) {
+        try {
+          await page.close();
+        } catch {
+          // ignore
+        }
       }
       await attached.dispose();
     }

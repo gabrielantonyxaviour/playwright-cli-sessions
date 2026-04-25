@@ -101,6 +101,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "timeout",
     "max-dimension",
     "no-downscale",
+    "close-tab",
   ],
   navigate: [
     "session",
@@ -117,6 +118,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "allow-http-error",
     "allow-auth-wall",
     "timeout",
+    "close-tab",
   ],
   snapshot: [
     "session",
@@ -132,6 +134,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "allow-http-error",
     "allow-auth-wall",
     "timeout",
+    "close-tab",
   ],
   exec: [
     "session",
@@ -148,6 +151,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "allow-auth-wall",
     "timeout",
     "eval",
+    "close-tab",
   ],
   login: ["session", "channel", "url"],
   refresh: ["url", "channel"],
@@ -172,10 +176,11 @@ const COMMAND_FLAGS: Record<string, string[]> = {
     "allow-http-error",
     "max-dimension",
     "no-downscale",
+    "close-tab",
   ],
   report: ["context", "no-notify"],
   reports: ["limit", "json"],
-  browser: ["channel", "json"],
+  browser: ["channel", "json", "match"],
 };
 
 /** Return the closest known flag if within edit-distance 2, else undefined. */
@@ -296,6 +301,7 @@ Usage:
   playwright-cli-sessions refresh <name> [--url=<url>] [--channel=<channel>]
   playwright-cli-sessions expect <url> [--title=<substr>] [--selector=<sel>] [--text=<substr>] [--status=<code>] [--session=<name>] [--timeout=<ms>] [--retry=<N>] [--screenshot-on-fail=<path>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
   playwright-cli-sessions browser <start|stop|status|import-sessions> [--channel=<chrome|msedge>] [--json]
+  playwright-cli-sessions browser tabs <list|close-all> [--match=<substring>] [--json]
   playwright-cli-sessions report "<message>" [--context=<N>] [--no-notify]
   playwright-cli-sessions reports [--limit=<N>] [--json]
 
@@ -610,6 +616,7 @@ async function main(): Promise<void> {
           timeout: parseTimeout(flags["timeout"]),
           maxDimension: parseMaxDimension(flags["max-dimension"]),
           noDownscale: flags["no-downscale"] === true,
+          closeTab: flags["close-tab"] === true,
         });
         break;
       }
@@ -644,6 +651,7 @@ async function main(): Promise<void> {
           allowHttpError: flags["allow-http-error"] === true,
           allowAuthWall: flags["allow-auth-wall"] === true,
           timeout: parseTimeout(flags["timeout"]),
+          closeTab: flags["close-tab"] === true,
         });
         break;
       }
@@ -677,6 +685,7 @@ async function main(): Promise<void> {
           allowHttpError: flags["allow-http-error"] === true,
           allowAuthWall: flags["allow-auth-wall"] === true,
           timeout: parseTimeout(flags["timeout"]),
+          closeTab: flags["close-tab"] === true,
         });
         break;
       }
@@ -721,6 +730,7 @@ async function main(): Promise<void> {
           allowAuthWall: flags["allow-auth-wall"] === true,
           timeout: parseTimeout(flags["timeout"]),
           evalScript,
+          closeTab: flags["close-tab"] === true,
         });
         break;
       }
@@ -857,6 +867,7 @@ async function main(): Promise<void> {
           allowHttpError: flags["allow-http-error"] === true,
           maxDimension: parseMaxDimension(flags["max-dimension"]),
           noDownscale: flags["no-downscale"] === true,
+          closeTab: flags["close-tab"] === true,
         });
         break;
       }
@@ -866,12 +877,14 @@ async function main(): Promise<void> {
         if (!sub) {
           throw new PcsError(
             "PCS_MISSING_ARG",
-            `browser requires a subcommand.\n  playwright-cli-sessions browser <start|stop|status|import-sessions> [--channel=<chrome|msedge>] [--json]`,
+            `browser requires a subcommand.\n  playwright-cli-sessions browser <start|stop|status|import-sessions|tabs> [args...] [--channel=<chrome|msedge>] [--match=<substring>] [--json]`,
           );
         }
         const channelFlag = flags["channel"];
-        await cmdBrowser(sub, {
+        const matchFlag = flags["match"];
+        await cmdBrowser(sub, rest.slice(1), {
           ...(typeof channelFlag === "string" ? { channel: channelFlag } : {}),
+          ...(typeof matchFlag === "string" ? { match: matchFlag } : {}),
           json: flags["json"] === true,
         });
         break;

@@ -42,6 +42,27 @@ playwright-cli-sessions browser start
 From here, every `screenshot` / `navigate` / `snapshot` / `exec` / `expect` /
 `login` auto-attaches to that Chrome. No further setup.
 
+### Tabs persist by default (v0.9.2+)
+
+In attached mode, `screenshot` / `navigate` / `snapshot` / `exec` / `expect`
+**leave the tab open** after the command finishes. The user can see the
+rendered page on the worker's screen (M2). This is the Playwright-MCP-like
+behaviour the user expects.
+
+To opt back into auto-close (useful in batch scripts): pass `--close-tab`.
+
+To clean up tabs:
+
+```bash
+playwright-cli-sessions browser tabs list                        # see what's open
+playwright-cli-sessions browser tabs close-all                   # close everything
+playwright-cli-sessions browser tabs close-all --match=example   # close URL-matching only
+```
+
+The "leave one tab alive" guard fires automatically when `close-all` would
+close every tab — Chrome quits the window with zero tabs, so we open
+`about:blank` first to keep the window up.
+
 ### Strict no-fallback (v0.9.1+) — `PCS_REMOTE_UNREACHABLE` (exit 79)
 
 When `PLAYWRIGHT_CLI_REMOTE` is set in the environment but no attached
