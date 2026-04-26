@@ -265,6 +265,16 @@ const STEALTH_LAUNCH_ARGS = [
   "--disable-blink-features=AutomationControlled",
   "--disable-remote-fonts",
   "--disable-features=DownloadableFontsPreferences",
+  // v0.9.6+: prevent Chrome from throttling background tabs. With multiple
+  // Claude sessions sharing the attached Chrome, only one tab can be the
+  // "foreground" at a time — without these flags Chrome can throttle the
+  // others' setTimeout / requestAnimationFrame / page-internal JS. Empirical
+  // testing showed CDP-attached tabs stayed visible in our setup, but we
+  // don't want to depend on undocumented behavior across Chrome versions.
+  // These flags guarantee 5+ concurrent sessions all get full execution.
+  "--disable-background-timer-throttling",
+  "--disable-renderer-backgrounding",
+  "--disable-backgrounding-occluded-windows",
 ];
 
 /**
