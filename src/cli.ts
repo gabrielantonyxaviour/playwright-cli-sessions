@@ -46,6 +46,7 @@ import { cmdRefresh } from "./commands/refresh.js";
 import { cmdReport, cmdReports } from "./commands/report.js";
 import { cmdExpect } from "./commands/expect.js";
 import { cmdBrowser } from "./commands/browser.js";
+import { cmdMonitor } from "./commands/monitor.js";
 import { PcsError, EXIT_CODE_MAP } from "./errors.js";
 import { levenshtein } from "./levenshtein.js";
 
@@ -181,6 +182,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   report: ["context", "no-notify"],
   reports: ["limit", "json"],
   browser: ["channel", "json", "match"],
+  monitor: ["since", "severity", "json"],
 };
 
 /** Return the closest known flag if within edit-distance 2, else undefined. */
@@ -302,6 +304,7 @@ Usage:
   playwright-cli-sessions expect <url> [--title=<substr>] [--selector=<sel>] [--text=<substr>] [--status=<code>] [--session=<name>] [--timeout=<ms>] [--retry=<N>] [--screenshot-on-fail=<path>] [--headed] [--channel=<channel>] [--wait-for=<selector>] [--wait-until=<event>]
   playwright-cli-sessions browser <start|stop|status|import-sessions> [--channel=<chrome|msedge>] [--json]
   playwright-cli-sessions browser tabs <list|close-all> [--match=<substring>] [--json]
+  playwright-cli-sessions monitor report [--since=24h|7d|30m] [--severity=info|warn|error] [--json]
   playwright-cli-sessions report "<message>" [--context=<N>] [--no-notify]
   playwright-cli-sessions reports [--limit=<N>] [--json]
 
@@ -323,6 +326,7 @@ Commands:
   refresh     Re-open an existing session to re-authenticate and update it
   expect      Assert page properties (title/selector/text/status) from the shell — exits 0/1
   browser     Manage the persistent attached Chrome (start | stop | status | import-sessions)
+  monitor     Audit usage log for bad-usage patterns across all sessions (report)
   report      File a structured issue report about unexpected CLI behavior
   reports     List recently filed reports
 
@@ -885,6 +889,24 @@ async function main(): Promise<void> {
         await cmdBrowser(sub, rest.slice(1), {
           ...(typeof channelFlag === "string" ? { channel: channelFlag } : {}),
           ...(typeof matchFlag === "string" ? { match: matchFlag } : {}),
+          json: flags["json"] === true,
+        });
+        break;
+      }
+
+      case "monitor": {
+        const sub = rest[0];
+        if (!sub) {
+          throw new PcsError(
+            "PCS_MISSING_ARG",
+            `monitor requires a subcommand.\n  playwright-cli-sessions monitor report [--since=24h] [--severity=warn|error] [--json]`,
+          );
+        }
+        const sinceFlag = flags["since"];
+        const sevFlag = flags["severity"];
+        await cmdMonitor(sub, {
+          ...(typeof sinceFlag === "string" ? { since: sinceFlag } : {}),
+          ...(typeof sevFlag === "string" ? { severity: sevFlag } : {}),
           json: flags["json"] === true,
         });
         break;
