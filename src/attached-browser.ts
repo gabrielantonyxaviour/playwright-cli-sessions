@@ -240,14 +240,74 @@ export function getRawState(): AttachedState | null {
 }
 
 /**
+ * v0.9.7+ — consistency guard between caller's PLAYWRIGHT_CLI_REMOTE env
+ * and the attached state file. Catches the silent-local-leak bug we saw on
+ * 2026-04-30: a shell without PLAYWRIGHT_CLI_REMOTE ran `browser start`,
+ * created a LOCAL state file, then OTHER shells (with the env var set
+ * correctly) silently attached to that local Chrome — bypassing the
+ * strict-fallback guard which only fires when state is absent.
+ *
+ * Now: if env says "I want remote=X" but state is local OR points at a
+ * different host, throw PCS_REMOTE_UNREACHABLE with an actionable message.
+ *
+ * Bypass with PLAYWRIGHT_CLI_ALLOW_LOCAL_FALLBACK=1 — same opt-in env we
+ * already use for the strict-fallback guard.
+ */
+function checkRemoteEnvVsState(state: AttachedState): void {
+  const envRemote = process.env.PLAYWRIGHT_CLI_REMOTE;
+  if (!envRemote || envRemote.length === 0) return;
+  if (process.env.PLAYWRIGHT_CLI_ALLOW_LOCAL_FALLBACK === "1") return;
+  if (!state.remote) {
+    throw new PcsError(
+      "PCS_REMOTE_UNREACHABLE",
+      `Mismatch: PLAYWRIGHT_CLI_REMOTE=${envRemote} is set in this shell, but the\n` +
+        `attached Chrome is LOCAL (no remote routing). Some other shell — one\n` +
+        `that did NOT have PLAYWRIGHT_CLI_REMOTE set — must have started it.\n` +
+        `\n` +
+        `Refusing to attach. This is the bug that caused silent-local-leaks on\n` +
+        `2026-04-30 — strict-fallback only fires when state is absent, but here\n` +
+        `state exists pointing at the wrong machine.\n` +
+        `\n` +
+        `Fix:\n` +
+        `  1. From a shell where PLAYWRIGHT_CLI_REMOTE=${envRemote} is set:\n` +
+        `       playwright-cli-sessions browser stop\n` +
+        `       playwright-cli-sessions browser start\n` +
+        `     This re-creates the state file pointing at the remote.\n` +
+        `\n` +
+        `  2. OR set PLAYWRIGHT_CLI_ALLOW_LOCAL_FALLBACK=1 in this shell to use\n` +
+        `     the local Chrome anyway (only with explicit user permission — never\n` +
+        `     set this autonomously).`,
+      { envRemote, stateRemote: null },
+    );
+  }
+  if (state.remote.host !== envRemote) {
+    throw new PcsError(
+      "PCS_REMOTE_UNREACHABLE",
+      `Mismatch: PLAYWRIGHT_CLI_REMOTE=${envRemote} but attached Chrome is on\n` +
+        `host="${state.remote.host}". Different remote target than expected.\n` +
+        `\n` +
+        `Run \`browser stop && browser start\` from a shell with the correct\n` +
+        `PLAYWRIGHT_CLI_REMOTE value to re-route to ${envRemote}.`,
+      { envRemote, stateRemoteHost: state.remote.host },
+    );
+  }
+}
+
+/**
  * Connect to the attached Chrome via CDP. Callers MUST NOT call
  * browser.close() — that would kill Chrome. Use the returned page-lifecycle
  * helpers instead. Returns null if no attached Chrome is available.
+ *
+ * Throws PCS_REMOTE_UNREACHABLE when the attached state file disagrees with
+ * PLAYWRIGHT_CLI_REMOTE in the current shell — surfaces silent local leaks
+ * instead of letting them happen.
  */
 export async function tryAttach(): Promise<Browser | null> {
   if (!(await isAttached())) return null;
   const state = readState();
   if (!state) return null;
+  // v0.9.7: refuse if env says remote but state is local (or vice-versa wrong host)
+  checkRemoteEnvVsState(state);
   try {
     return await chromium.connectOverCDP(`http://127.0.0.1:${state.port}`);
   } catch {
