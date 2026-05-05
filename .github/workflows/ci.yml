@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: build + scenarios (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: TypeScript build
+        run: npm run build
+
+      - name: Install Chromium for scenarios
+        run: npx playwright install --with-deps chromium
+
+      - name: Scenario harness
+        # Scenarios use PLAYWRIGHT_CLI_HEADLESS=1 internally so they don't
+        # require a display. Most scenarios are sandboxed against
+        # PLAYWRIGHT_SESSIONS_DIR. The "default-channel" scenario uses
+        # `--channel=chromium` which only succeeds when Chromium is installed
+        # via npx playwright install (above).
+        run: npm test

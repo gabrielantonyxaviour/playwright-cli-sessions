@@ -1,13 +1,132 @@
 # playwright-cli-sessions
 
-Session management layer for `@playwright/cli` — named saved logins, live service probes, and clone safety. Reads/writes `~/.playwright-sessions/`, making it fully interoperable with the [`playwright-sessions`](https://www.npmjs.com/package/playwright-sessions) MCP.
+> **Stateless Playwright CLI for AI agents — one persistent Chrome, zero focus theft.**
+
+[![npm](https://img.shields.io/npm/v/playwright-cli-sessions.svg)](https://www.npmjs.com/package/playwright-cli-sessions)
+[![CI](https://github.com/gabrielantonyxaviour/playwright-cli-sessions/actions/workflows/ci.yml/badge.svg)](https://github.com/gabrielantonyxaviour/playwright-cli-sessions/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+
+A shell-first Playwright wrapper built for the way AI agents actually
+work — every command is its own process, saved logins live in
+`~/.playwright-sessions/`, and one optional persistent Chrome handles the
+window so you never get a window pop on every invocation.
+
+If you've used [`@playwright/mcp`](https://github.com/microsoft/playwright-mcp)
+and felt the friction of stdio bottlenecks, profile contamination across
+sessions, or "why did three Chromes just open" — this is the alternative
+shape. They serve different use cases (see [Comparison](#comparison)
+below).
 
 ## Install
 
 ```bash
 npm install -g playwright-cli-sessions
-# Browser commands require Chromium:
+# Browser commands need Chromium — one-time:
 npx playwright install chromium
+```
+
+## Quick start (single machine, no setup)
+
+```bash
+# Capture a public page (no login, no setup):
+playwright-cli-sessions screenshot https://example.com --out=/tmp/x.png
+
+# Want one Chrome that survives between commands? Start it once:
+playwright-cli-sessions browser start
+playwright-cli-sessions screenshot https://news.ycombinator.com --out=/tmp/y.png
+playwright-cli-sessions navigate https://playwright.dev
+playwright-cli-sessions browser tabs list   # see what's open
+playwright-cli-sessions browser stop        # when you're done for the day
+```
+
+That's it. Runs on your local machine, no SSH host required, no daemon
+to manage. The `~/Documents/`-style "advanced multi-machine" setup
+(routing Chrome to a dedicated worker Mac via Tailscale + SSH tunnel) is
+[documented below](#optional-advanced-route-chrome-to-a-remote-worker)
+but optional — most people won't need it.
+
+## Why?
+
+**The problem.** Stateless Playwright (`npx playwright`) pops a fresh
+Chrome window on every command — focus theft, profile contamination,
+2-second cold start. MCP servers fix the cold start but introduce a
+single stdio bottleneck that breaks shell parallelism and a long-lived
+process you have to babysit.
+
+**The fix.** A stateless CLI in front of one optional persistent Chrome
+that all commands attach to via CDP. Persistent profile (so Google
+trusts you), no per-command window pops, true shell-level parallelism
+via `&`. Saved logins are read-only files — multiple commands can use
+the same session in parallel without coordination.
+
+**Plus**, because v0.10.0+ knows about AI agents specifically:
+
+- Every error prints a `next steps:` block tailored to the failure code.
+  Empty stderr is a CLI bug, not a thing you tolerate.
+- A built-in stuck-loop detector watches `~/.playwright-sessions/.usage-log.jsonl`
+  and prints `⚠ STUCK LOOP DETECTED` to stderr when an agent has fired
+  the same failing command three times in five minutes — *before* the
+  fourth blind retry happens. Advisory, not blocking.
+- Tab/window-control loss gets its own error class
+  (`PCS_BROWSER_CONTROL_LOST`, exit 21) with a "stop, restart once,
+  retry once, then file a report — don't loop" doctrine.
+
+These are the kinds of features you only build after watching enough
+agent sessions burn 9 minutes on a retry loop.
+
+## Comparison
+
+|  | `@playwright/mcp` | this CLI |
+|---|---|---|
+| Process model | One long-lived MCP server | Stateless per-command |
+| Concurrency | Serialized through stdio | Real shell `&` parallelism |
+| Window behaviour | Manages its own browser | Optional `browser start` for persistence |
+| Saved auth | In-process | `~/.playwright-sessions/` JSON files |
+| Multi-session use | One client at a time | N parallel processes share read-only state |
+| Setup | Add to MCP client config | `npm install -g`, run anything |
+| Best for | Single-agent workflows inside one MCP host | Shell scripts, CI, multi-agent orchestration, anything outside an MCP host |
+
+They co-exist fine — `~/.playwright-sessions/` is interoperable with the
+[`playwright-sessions`](https://www.npmjs.com/package/playwright-sessions)
+MCP, so sessions saved by either tool are visible to both.
+
+## Optional: advanced — route Chrome to a remote worker
+
+If you've got a dedicated headful host (a Mac mini in a closet, an EC2
+with X), set one env var and Chrome runs there transparently. Every CLI
+command tunnels via SSH to the remote CDP — no flag changes on the
+command side.
+
+```bash
+export PLAYWRIGHT_CLI_REMOTE=worker-host  # SSH alias to your worker
+playwright-cli-sessions browser start     # spawns Chrome on worker
+playwright-cli-sessions screenshot https://example.com --out=/tmp/x.png
+# Chrome runs on worker-host, screenshot ends up in your /tmp.
+```
+
+Strict no-fallback (v0.9.1+): when `PLAYWRIGHT_CLI_REMOTE` is set, the
+CLI refuses to silently spawn local Chrome if the remote is unreachable.
+You get `PCS_REMOTE_UNREACHABLE` (exit 79) with diagnostic next-steps
+instead of an unwanted local window. Override with
+`PLAYWRIGHT_CLI_ALLOW_LOCAL_FALLBACK=1` only when you've explicitly
+chosen to.
+
+## Examples
+
+[`/examples`](./examples/) has runnable recipes — stateless screenshot,
+parallel multi-page capture, attached-mode tab reuse, exec-script data
+extraction, saved-session login flow, `expect` as a shell assertion, and
+the stuck-loop recovery ladder.
+
+## Skill bundle for Claude Code
+
+The repo ships a Claude Code skill at
+[`skills/playwright-cli-sessions/`](./skills/playwright-cli-sessions/SKILL.md).
+Install it into a project so an agent picks up the time doctrine,
+diagnostic ladder, and operating posture automatically:
+
+```bash
+playwright-cli-sessions install --skills
 ```
 
 ## Commands
@@ -418,6 +537,11 @@ Both `playwright-cli-sessions` and `playwright-sessions` MCP share `~/.playwrigh
 
 Vercel, GitHub, Google, YouTube, Neon, Supabase, LinkedIn, Notion, Higgsfield AI, Instagram, X/Twitter, Microsoft, Tldv.
 
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md). Bugs go in GitHub Issues;
+questions go in GitHub Discussions; PRs welcome.
+
 ## License
 
-Apache-2.0
+[MIT](./LICENSE)
