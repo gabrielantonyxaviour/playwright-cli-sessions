@@ -20,6 +20,25 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - run: npm ci
       - run: npm run build
-      - run: npm publish --access public
+
+      # Tags can be pushed after a local `npm publish` (e.g. when the
+      # maintainer publishes from their machine first). Without this
+      # guard the workflow fails with E403 "cannot publish over the
+      # previously published version" — confusing red on a green release.
+      - name: Check if version already on npm
+        id: version_check
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if npm view "playwright-cli-sessions@$PKG_VERSION" version >/dev/null 2>&1; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "playwright-cli-sessions@$PKG_VERSION is already on npm — skipping publish."
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+            echo "playwright-cli-sessions@$PKG_VERSION not yet on npm — proceeding."
+          fi
+
+      - name: npm publish
+        if: steps.version_check.outputs.already_published == 'false'
+        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
