@@ -33,8 +33,10 @@ jobs:
 
       - name: Scenario harness
         # Scenarios use PLAYWRIGHT_CLI_HEADLESS=1 internally so they don't
-        # require a display. Most scenarios are sandboxed against
-        # PLAYWRIGHT_SESSIONS_DIR. The "default-channel" scenario uses
-        # `--channel=chromium` which only succeeds when Chromium is installed
-        # via npx playwright install (above).
+        # require a display. Most are sandboxed against PLAYWRIGHT_SESSIONS_DIR.
+        # VERBOSE=1 surfaces each scenario's full output on failure — without
+        # it, a failed assertion shows "FAIL (exit 1)" with no context, which
+        # makes triaging CI-only failures painful.
+        env:
+          VERBOSE: "1"
         run: npm test

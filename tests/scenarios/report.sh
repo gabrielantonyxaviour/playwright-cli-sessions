@@ -119,9 +119,15 @@ shopt -u nullglob
 # Newest-first by file name (timestamp prefix): the last entry by sort is newest.
 IFS=$'\n' sorted=($(printf '%s\n' "${md_files2[@]}" | sort))
 unset IFS
-newest="${sorted[-1]}"
-table_rows="$(grep -c '^| ' "$newest" || true)"
-# 2 header lines + 1 data row = 3 rows total.
+# Last-element index: bash 3.2 (macOS default) does NOT support ${arr[-1]};
+# compute the index explicitly so this is portable across macOS + Linux CI.
+newest="${sorted[$((${#sorted[@]} - 1))]}"
+# Markdown table emits 3 lines beginning with "|" for --context=1:
+#   | time | cmd | exit | duration | error |    ← header (starts "| ")
+#   |------|-----|-----:|---------:|-------|    ← separator (starts "|-")
+#   | 2026-... | report | ... |                  ← 1 data row (starts "| ")
+# Match all three with `^|` (no trailing space) so the separator counts.
+table_rows="$(grep -c '^|' "$newest" || true)"
 assert_eq "3" "$table_rows" "--context=1 embeds exactly one data row (plus 2 header rows)"
 
 # ── 9. --limit caps the list output ───────────────────────────────────
@@ -165,10 +171,13 @@ ok_report="$(node -e "
 " "$LOG_FILE")"
 assert_eq "yes" "$ok_report" "usage log contains at least one successful report entry"
 
-# And at least one failed invocation (from case 7) with exitCode=1 + an 'error' field.
+# And at least one failed invocation (from case 7 — empty message → exit 2,
+# PCS_MISSING_ARG) with a non-empty `error` field. We match `exitCode !== 0`
+# rather than a specific code so the assertion stays valid as the error code
+# scheme evolves (e.g. v0.4.0 changed missing-arg from 1 to 2).
 ok_failed="$(node -e "
   const lines = require('fs').readFileSync(process.argv[1],'utf8').split('\n').filter(Boolean);
-  const hit = lines.map(l => JSON.parse(l)).find(e => e.exitCode === 1 && typeof e.error === 'string' && e.error.length > 0);
+  const hit = lines.map(l => JSON.parse(l)).find(e => e.exitCode !== 0 && typeof e.error === 'string' && e.error.length > 0);
   process.stdout.write(hit ? 'yes' : 'no');
 " "$LOG_FILE")"
 assert_eq "yes" "$ok_failed" "usage log carries error field for failed invocations"

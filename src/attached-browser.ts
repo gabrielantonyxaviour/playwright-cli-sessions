@@ -127,20 +127,75 @@ function findFreePort(): Promise<number> {
   });
 }
 
-/** Locate the Chrome executable. macOS canonical path first. */
+/**
+ * Locate the Chrome (or chromium / msedge) executable for the current
+ * platform. Honours `PLAYWRIGHT_CLI_CHROME_PATH` first, then falls back
+ * to a per-platform candidate list. macOS uses .app bundle paths; Linux
+ * checks the standard `/usr/bin/...` locations a default Ubuntu /
+ * GitHub Actions runner ships with.
+ */
 function findChromeBinary(channel: string): string {
   const explicit = process.env.PLAYWRIGHT_CLI_CHROME_PATH;
   if (explicit && existsSync(explicit)) return explicit;
-  if (channel === "msedge") {
-    const edge =
-      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge";
-    if (existsSync(edge)) return edge;
+
+  const candidates: string[] = [];
+  if (process.platform === "darwin") {
+    if (channel === "msedge") {
+      candidates.push(
+        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+      );
+    }
+    if (channel === "chromium") {
+      candidates.push("/Applications/Chromium.app/Contents/MacOS/Chromium");
+    }
+    candidates.push(
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    );
+  } else if (process.platform === "linux") {
+    if (channel === "msedge") {
+      candidates.push(
+        "/usr/bin/microsoft-edge",
+        "/usr/bin/microsoft-edge-stable",
+      );
+    }
+    if (channel === "chromium") {
+      candidates.push(
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/snap/bin/chromium",
+      );
+    }
+    // Default order on Linux: real Chrome first, fall back to Chromium so
+    // CI environments (GitHub Actions Ubuntu) work even without explicit
+    // --channel=chromium.
+    candidates.push(
+      "/usr/bin/google-chrome",
+      "/usr/bin/google-chrome-stable",
+      "/opt/google/chrome/chrome",
+      "/usr/bin/chromium",
+      "/usr/bin/chromium-browser",
+    );
+  } else if (process.platform === "win32") {
+    if (channel === "msedge") {
+      candidates.push(
+        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+        "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+      );
+    }
+    candidates.push(
+      "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+    );
   }
-  const canonical =
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-  if (existsSync(canonical)) return canonical;
+
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
+
   throw new Error(
-    `Could not find Chrome at ${canonical}. Set PLAYWRIGHT_CLI_CHROME_PATH to override.`,
+    `Could not find Chrome on this ${process.platform} system.\n` +
+      `Tried: ${candidates.join(", ") || "(no candidates)"}\n` +
+      `Set PLAYWRIGHT_CLI_CHROME_PATH to point at your browser binary.`,
   );
 }
 
