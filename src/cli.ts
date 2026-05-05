@@ -47,10 +47,69 @@ import { cmdReport, cmdReports } from "./commands/report.js";
 import { cmdExpect } from "./commands/expect.js";
 import { cmdBrowser } from "./commands/browser.js";
 import { cmdMonitor } from "./commands/monitor.js";
-import { PcsError, EXIT_CODE_MAP } from "./errors.js";
+import {
+  PcsError,
+  EXIT_CODE_MAP,
+  DEFAULT_NEXT_STEPS,
+  type PcsErrorCode,
+} from "./errors.js";
 import { levenshtein } from "./levenshtein.js";
+import { detectStuckLoop, formatStuckWarning } from "./stuck-detector.js";
 
 const args = process.argv.slice(2);
+
+// Top-level safety nets. The whole point of fail-loud-fail-useful is that
+// nothing escapes with empty stderr. Without these, an unhandled rejection
+// or uncaught throw exits 1 silently — exactly the bug the Codex log
+// surfaced. Both handlers print a structured PCS_UNKNOWN line + next-steps
+// so the agent always has signal to act on.
+process.on("uncaughtException", (err) => {
+  console.error(
+    `Error [PCS_UNKNOWN]: uncaughtException — ${err instanceof Error ? err.message : String(err)}`,
+  );
+  console.error("  next steps:");
+  for (const step of DEFAULT_NEXT_STEPS["PCS_UNKNOWN"]) {
+    console.error(`    - ${step}`);
+  }
+  process.exit(1);
+});
+process.on("unhandledRejection", (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.error(`Error [PCS_UNKNOWN]: unhandledRejection — ${msg}`);
+  console.error("  next steps:");
+  for (const step of DEFAULT_NEXT_STEPS["PCS_UNKNOWN"]) {
+    console.error(`    - ${step}`);
+  }
+  process.exit(1);
+});
+
+/**
+ * Common Playwright disconnect/teardown error fragments. When a regular
+ * Error (not a PcsError) bubbles up with one of these in its message,
+ * the cli catch handler reclassifies it as PCS_BROWSER_CONTROL_LOST so
+ * the agent gets a specific, actionable next-steps block instead of the
+ * generic PCS_UNKNOWN.
+ */
+const BROWSER_CONTROL_LOST_FRAGMENTS = [
+  "Target page, context or browser has been closed",
+  "Target closed",
+  "Browser has been closed",
+  "browserContext.newPage: Browser closed",
+  "browser has disconnected",
+  "WebSocket is not open",
+  "WebSocket connection closed",
+  "Frame was detached",
+  "Protocol error (Page.navigate): Session closed",
+  "Protocol error (Target.attachToTarget): Session closed",
+  "Protocol error (Runtime.callFunctionOn): Target closed",
+] as const;
+
+function looksLikeBrowserControlLost(msg: string): boolean {
+  for (const f of BROWSER_CONTROL_LOST_FRAGMENTS) {
+    if (msg.includes(f)) return true;
+  }
+  return false;
+}
 
 function parseFlags(argv: string[]): {
   positional: string[];
@@ -477,6 +536,21 @@ async function main(): Promise<void> {
     loggedCommand = "help";
     usage();
     process.exit(0);
+  }
+
+  // Pre-run stuck-loop advisory. Only fires for agent invocations
+  // (CLAUDECODE=1) when this same command has failed ≥3 times with the
+  // same exit code in the last 5 minutes. Non-blocking — the command
+  // still runs. The point is to make blind retries visible BEFORE the
+  // next one happens, not to refuse them.
+  // Suppress for `report` itself so filing a report from inside a
+  // stuck loop doesn't trigger another warning.
+  if (command !== "report" && command !== "reports") {
+    const stuck = detectStuckLoop(command);
+    if (stuck) {
+      console.error(formatStuckWarning(stuck));
+      console.error("");
+    }
   }
 
   try {
@@ -966,13 +1040,41 @@ async function main(): Promise<void> {
       if (Object.keys(err.details).length > 0) {
         console.error(`  details: ${JSON.stringify(err.details)}`);
       }
+      printNextSteps(err.code, err.nextSteps);
       process.exit(EXIT_CODE_MAP[err.code]);
     } else {
       const message = err instanceof Error ? err.message : String(err);
       loggedError = message;
+      // Reclassify Playwright disconnect/teardown errors as the more
+      // specific PCS_BROWSER_CONTROL_LOST so the agent gets a tailored
+      // next-steps block (restart Chrome, retry once, then report —
+      // don't loop). Without this they used to fall through as raw
+      // PCS_UNKNOWN with the underlying Playwright stack trace.
+      if (looksLikeBrowserControlLost(message)) {
+        console.error(`Error [PCS_BROWSER_CONTROL_LOST]: ${message}`);
+        printNextSteps("PCS_BROWSER_CONTROL_LOST", []);
+        process.exit(EXIT_CODE_MAP["PCS_BROWSER_CONTROL_LOST"]);
+      }
       console.error(`Error [PCS_UNKNOWN]: ${message}`);
+      printNextSteps("PCS_UNKNOWN", []);
       process.exit(1);
     }
+  }
+}
+
+/**
+ * Print the `next steps:` block for an error. Per-call `override` wins
+ * over the default; if both are empty (shouldn't happen — DEFAULT_NEXT_STEPS
+ * has an entry for every code), we print nothing and rely on the message
+ * itself.
+ */
+function printNextSteps(code: PcsErrorCode, override: string[]): void {
+  const steps =
+    override && override.length > 0 ? override : DEFAULT_NEXT_STEPS[code];
+  if (!steps || steps.length === 0) return;
+  console.error("  next steps:");
+  for (const step of steps) {
+    console.error(`    - ${step}`);
   }
 }
 

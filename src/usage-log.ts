@@ -95,3 +95,29 @@ export function readRecentUsage(limit = 20): UsageLogEntry[] {
     return [];
   }
 }
+
+/**
+ * Read entries for a specific subcommand whose `ts` is within `withinMs`
+ * of now. Optional `invokedBy` filter — when set to "claude-code", only
+ * agent-issued runs count. Used by stuck-detector to spot blind retries.
+ *
+ * Reads only the tail (last 200 entries) — stuck loops are recent by
+ * definition; we don't need to scan the whole file.
+ */
+export function readRecentByCmd(
+  cmd: string,
+  withinMs: number,
+  invokedBy?: InvocationSource,
+): UsageLogEntry[] {
+  const tail = readRecentUsage(200);
+  const cutoff = Date.now() - withinMs;
+  const out: UsageLogEntry[] = [];
+  for (const entry of tail) {
+    if (entry.cmd !== cmd) continue;
+    if (invokedBy && entry.invokedBy !== invokedBy) continue;
+    const t = Date.parse(entry.ts);
+    if (Number.isNaN(t) || t < cutoff) continue;
+    out.push(entry);
+  }
+  return out;
+}

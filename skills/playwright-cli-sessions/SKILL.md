@@ -29,6 +29,62 @@ Gmail MCP for OTPs and verification emails, vault for credentials, keychain
 integration. Use that access. Treat any ask to the user as a failure of
 your own execution unless it falls in the single legit hand-off below.
 
+## ⚑ TIME DOCTRINE — the budget you must stay inside
+
+**Time is the user's most valuable currency.** Retries are fine; *blind*
+retries are not. The CLI itself watches for blind-retry loops (v0.10.0+)
+and will print a `⚠ STUCK LOOP DETECTED` warning to stderr when the same
+command fails ≥3 times with the same exit code in 5 minutes. If you see
+that warning, stop and follow the diagnostic ladder below — do not fire
+the command a fourth time.
+
+Concrete numbers you must respect:
+
+- **2 strikes = step back.** If the same command fails twice with the
+  same error, the third attempt MUST NOT be a cosmetic variation. Either
+  diagnose (screenshot, `browser status`, `tabs list`) or escape (file
+  `report`, surface the failure to the user).
+- **5 minutes = check in.** If a single browser path is taking more than
+  5 minutes of wall-clock, send a status update to the user with what
+  you've tried and what's blocking. Don't disappear into a loop.
+- **10 commands = forced report.** If you've fired 10 browser commands
+  on the same task without progress, run `report "<what you tried>"`
+  before another invocation. The report auto-attaches your last 10
+  CLI invocations for context.
+- **Cannot control the tab/window? Report immediately.** If you see
+  exit code 21 / `PCS_BROWSER_CONTROL_LOST`, do `browser stop && browser
+  start` ONCE, retry the original command ONCE, then surface the failure.
+  Do not loop. The browser is telling you something deeper is wrong.
+- **Empty stderr on a failure is a CLI bug.** If a command exits non-zero
+  with no message, that is itself worth reporting (`report "empty stderr
+  on <command>"`). v0.10.0+ should never produce this. If you ever see
+  it, file a report rather than retrying.
+
+### Diagnostic ladder when stuck
+
+When a command fails — **before** retrying with a flag tweak — run this
+ladder, in order. Each step costs seconds and saves minutes:
+
+1. **`browser status`** — am I attached? Is the host the one I expect
+   (M2 worker, not local M4)? If state is DEAD, `browser stop && browser
+   start` and retry once.
+2. **`browser tabs list`** — what's actually open? Is the page I think
+   I'm working on still alive?
+3. **`screenshot <url> --allow-http-error --out=/tmp/x.png`** — what does
+   the page actually render? Don't guess. Look.
+4. **Read the rendered page** (snapshot or look at the screenshot) — is
+   it an auth wall? CAPTCHA? error page? Different layout than expected?
+5. **Read the failure's `next steps:` block.** Every PcsError prints one
+   in v0.10.0+ — those steps are tailored to the specific error code and
+   are usually the right move. Follow them before improvising.
+6. **Stop.** Either fix the root cause (the right move 90% of the time)
+   or file `report "<what you tried>"` and surface to the user. Don't
+   loop.
+
+If you get a `⚠ STUCK LOOP DETECTED` banner, you've already passed step
+5+ without realizing it. The CLI is yelling at you. Step 6 is now
+mandatory.
+
 ### Session boot-up ritual (do this first, every fresh session that touches a browser)
 
 ```bash
@@ -511,8 +567,16 @@ own browser.
 |------|------|---------|
 | 77 | `PCS_AUTH_WALL` | Redirected to login — session missing or expired |
 | 77 | `PCS_STALE_SESSION` | Pre-launch probe says session is dead |
+| 21 | `PCS_BROWSER_CONTROL_LOST` | Tab/page closed mid-action, browser disconnected, frame detached. **`browser stop && browser start` once, retry once, then report. Do not loop.** (v0.10.0+) |
 | 11 | `PCS_HTTP_ERROR` | 4xx/5xx response on goto |
 | 10 | `PCS_SELECTOR_TIMEOUT` | A `--wait-for*` flag did not resolve |
+| 79 | `PCS_REMOTE_UNREACHABLE` | `PLAYWRIGHT_CLI_REMOTE` set but no attached Chrome reachable on remote — see strict no-fallback section above |
+
+**v0.10.0+ — every error prints a `next steps:` block** beneath the
+message. Read it before retrying. The steps are tailored to the specific
+error code and are usually the right move. If you ignore them and loop,
+you'll see `⚠ STUCK LOOP DETECTED` on the 4th identical retry — at which
+point follow the diagnostic ladder above immediately.
 
 See [`references/error-codes.md`](references/error-codes.md) for the full
 `PCS_*` table including `PCS_AUTH_EXPIRED`, `PCS_NAV_FAILED`,

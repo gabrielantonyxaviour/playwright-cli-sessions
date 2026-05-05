@@ -123,12 +123,31 @@ export async function checkAuthWall(
     // callers (and humans) know to hand off to `login --url=<url>` in a TTY
     // rather than retrying with a saved session.
     const isChallenge = signal === "challenge" || signal === "captcha";
+    const named = sessionName !== "none";
+    const nextSteps = isChallenge
+      ? [
+          `Run \`playwright-cli-sessions login ${named ? sessionName : "<session>"} --url=${finalUrl}\` in a TTY so the challenge can be solved manually.`,
+          "Once solved, the resulting session cookie carries past the wall — re-run with `--session=<name>`.",
+          "Don't try to script past it; CAPTCHAs and Cloudflare Turnstile cannot be bypassed by retrying.",
+        ]
+      : named
+        ? [
+            `The saved session "${sessionName}" looks logged out. Run \`playwright-cli-sessions refresh ${sessionName}\` to re-login.`,
+            `After refreshing, re-run the original command with \`--session=${sessionName}\`.`,
+            "Don't loop: a second identical attempt will fail the same way.",
+          ]
+        : [
+            "This page needs auth and no session was provided.",
+            "Pass `--session=<name>` if you have one saved (run `list` to see names),",
+            "or run `login <name> --url=<login-url>` to create a new saved session.",
+          ];
     throw new PcsError(
       isChallenge ? "PCS_CHALLENGE_WALL" : "PCS_AUTH_WALL",
       isChallenge
         ? `Challenge wall detected (${signal}) at ${finalUrl}`
         : `Auth wall detected (${signal}) at ${finalUrl}`,
       { finalUrl, title, signal, session: sessionName, service },
+      nextSteps,
     );
   }
 }
